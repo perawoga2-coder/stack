@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MPL-2.0
+# STACK's build settings (base/tools/build.py)
+name = "stack"                 # the build's files: stack.fwsc, stack-X.Y.Z.fwsc, stack_host
+id_prefix = "FM-1_58"          # package identity. TEMPORARY for the test builds: to be confirmed against the hubs' lists
+usb_manufacturer = "Maker Hip"
+usb_product = "STACK FM-1"
+o2 = []
+words = "words.tsv"
+ble = false                    # Bluetooth MIDI comes in a later version
+# the site and firmware.json
+tagline = "eight tracks of sounds, easy to follow"
+repo = "https://github.com/perawoga2-coder/stack"
+licence = "MPL-2.0"
+credits = "Built on fm1-base and felucca-bsp (MPL-2.0), from Felucca by Leo Kuroshita (Hugelton Instruments). Sounds: Maker Hip's Rock kit; the Hugelton Sample Pack by Leo Kuroshita (CC0); Versilian Studios VCSL (CC0); two sounds rendered from Felucca presets (temporary)."
+author = "Maker Hip"
+description = "STACK 0.1.0-test: a test build. Eight tracks, each with one sound from a single list; the keys play the selected track; four knobs shape it (pitch, a DJ filter, decay, level); a basic 16-step page. Nothing is saved yet."
+tags = ["groovebox", "sampler"]
+install = "https://github.com/perawoga2-coder/stack"
+site = "https://github.com/perawoga2-coder/stack"
+screenshot = "docs/screen-play.png"

@@ -1,0 +1,19 @@
+# STACK licensing
+
+STACK is under the Mozilla Public License 2.0 (MPL-2.0), file by file: each source file says so in its first lines.
+
+| What | Origin | Licence |
+| --- | --- | --- |
+| `app/app.c`, `app/app.h`, `app/fm1.toml`, `app/words.tsv`, `app/tests/`, `tools/make_sounds.py` | Maker Hip. `app.c` and `app.h` were started from fm1-base's `template/` (Copyright (C) 2026 Charles Vestal) | MPL-2.0 |
+| `base/` | [fm1-base](https://github.com/charlesvestal/fm1-base) at `2bb8e74` with [felucca-bsp](https://github.com/hugelton/felucca-bsp) at `2bd9dbe` (`BASE_COMMITS.txt`), unchanged. In the repository it is to be a git submodule | MPL-2.0; its own third-party parts in `base/LICENSING.md` |
+| The built-in sounds (`app/sounds_data.h`) | see `app/SOUNDS.md` | Maker Hip's own, CC0 1.0, and rendered audio |
+
+Rules this project keeps:
+
+- No GPL code: nothing from Felucca or from the Burger Studio firmware (bs19). `base/tools/provenance.py` was run on
+  the app's files against both: 0 files with Felucca's lines (it finds copies, not rewrites).
+- From Felucca only rendered audio is ever shipped: never its preset data, patch tables or code.
+- The JieLi SDK files the build needs are fetched by the build and never committed.
+- fm1-base's fonts are under the SIL OFL 1.1 (`base/LICENSING.md`).
+
+M-VAVE and FM-1 are trademarks of their owners. STACK is not affiliated with or endorsed by M-VAVE.

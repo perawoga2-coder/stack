@@ -1,0 +1,186 @@
+# STACK 0.1.0-test in the host simulator: base/tools/build.py app --host, then
+#   app/build/host/stack_host app/tests/basic.txt app/build/host
+master 4096
+wait 600
+shot boot.png
+expect track 1
+expect sound 1
+expect nlist 23
+expect undo 0
+# power on, press a key, hear track 1 at once (a drum: every key the same hit)
+wav t1_kick.wav
+key 7 down 100
+wait 80
+expect voices >0
+key 7 up
+wait 500
+wavstop
+expect peak_db_min -30
+# ALGORITHM: one detent a track, stops at 1 and 8
+turn ALGO -3
+wait 30
+expect track 1
+turn ALGO 3
+wait 30
+expect track 4
+turn ALGO 20
+wait 30
+expect track 8
+expect sound 0
+turn ALGO -3
+wait 30
+expect track 5
+# track 5 (PIANO): the keys play notes; held, then let go
+wav t5_piano.wav
+key 7 down 100
+wait 300
+key 11 down 90
+wait 300
+key 7 up
+key 11 up
+wait 400
+wavstop
+expect peak_db_min -30
+# PRESETS: only the sound changes; the screen says old > new; REC undoes back past the whole turn
+turn K1 5
+turn K4 -10
+wait 30
+expect pitch 5
+expect level 70
+turn PRESET 1
+wait 40
+turn PRESET 1
+wait 40
+shot sound_change.png
+expect sound 19
+expect undo 1
+expect pitch 5
+expect level 70
+leds
+tap REC
+wait 40
+shot undo.png
+expect sound 17
+expect undo 0
+leds
+tap REC
+wait 40
+turn K1 -5
+turn K4 10
+wait 30
+# the list stops at its ends
+turn PRESET 40
+wait 40
+expect sound 22
+turn PRESET 1
+wait 40
+expect sound 22
+turn PRESET -60
+wait 40
+expect sound 0
+turn PRESET -1
+wait 40
+expect sound 0
+wait 1700
+turn PRESET 17
+wait 40
+expect sound 17
+# FILTER: off in the middle (seven detents), then low-pass left, high-pass right
+turn K2 3
+wait 30
+expect filt 3
+shot filter_off.png
+turn K2 20
+wait 30
+shot filter_hp.png
+wav t5_hp.wav
+key 7 down 100
+wait 300
+key 7 up
+wait 200
+wavstop
+turn K2 -60
+wait 30
+expect filt -37
+shot filter_lp.png
+wav t5_lp.wav
+key 7 down 100
+wait 300
+key 7 up
+wait 200
+wavstop
+turn K2 37
+wait 30
+expect filt 0
+# OCT: on release; both together move nothing
+press OCT+
+wait 60
+expect octave 0
+release OCT+
+wait 30
+expect octave 1
+press OCT-
+wait 20
+press OCT+
+wait 60
+release OCT-
+wait 20
+release OCT+
+wait 60
+expect octave 1
+tap OCT-
+wait 30
+expect octave 0
+# the step page: a tap sets a step; a step held and KNOB 1 turned gives its note
+tap SEQ
+wait 60
+expect page 1
+key w0 down
+wait 40
+key w0 up
+wait 40
+expect step1 60
+key w4 down
+wait 40
+turn K1 7
+wait 40
+key w4 up
+wait 40
+expect step5 67
+shot steps.png
+turn ALGO -4
+wait 30
+expect track 1
+tapkey w0
+wait 40
+tapkey w4
+wait 40
+tapkey w8
+wait 40
+tapkey w12
+wait 40
+expect step1 60
+expect step5 60
+expect step9 60
+expect step13 60
+wav pattern.wav
+tap PLAY
+wait 40
+expect playing 1
+wait 2100
+shot steps_playing.png
+leds
+tap PLAY
+wait 300
+wavstop
+expect playing 0
+expect peak_db_min -30
+tap SEQ
+wait 60
+expect page 0
+shot play_page.png
+# a button with no job says so
+tap FX
+wait 40
+shot not_yet.png
+expect store_writes 0

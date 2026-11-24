@@ -1,0 +1,55 @@
+name: STACK firmware
+
+# Builds the STACK .fwsc on GitHub (this session's machine cannot reach JieLi's download hosts).
+# fm1-base is fetched at the pinned commit in stack/BASE_COMMITS.txt (unchanged), with its felucca-bsp submodule.
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [main]
+    paths: ["stack/**", ".github/workflows/stack-firmware.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fm1-base (pinned)
+        run: |
+          BASE=$(sed -n 1p stack/BASE_COMMITS.txt)
+          BSP=$(sed -n 2p stack/BASE_COMMITS.txt)
+          git clone -q https://github.com/charlesvestal/fm1-base stack/base
+          git -C stack/base checkout -q "$BASE"
+          git -C stack/base submodule update --init -q
+          git -C stack/base/bsp checkout -q "$BSP"
+          git -C stack/base log -1 --format='fm1-base %H'
+          git -C stack/base/bsp log -1 --format='felucca-bsp %H'
+
+      - name: Toolchain (JieLi clang, AC79 SDK files, Python)
+        run: |
+          for i in 1 2 3; do sh stack/base/tools/setup_toolchain.sh --only uv,python,jieli,ac79-sdk && break; sleep 30; done
+
+      - name: Simulator tests
+        run: |
+          cd stack
+          base/.venv/bin/python base/tools/build.py app --host
+          app/build/host/stack_host app/tests/basic.txt app/build/host
+
+      - name: Build
+        id: b
+        run: |
+          VER=0.1.0-test
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          cd stack
+          base/.venv/bin/python base/tools/build.py app --release "$VER"
+          ls -la app/build/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stack-${{ steps.b.outputs.ver }}
+          path: |
+            stack/app/build/*.fwsc
+            stack/app/build/firmware.json

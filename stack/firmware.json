@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "stack",
+  "name": "Maker Hip",
+  "author": "Maker Hip",
+  "license": "MPL-2.0",
+  "tagline": "eight tracks of sounds, easy to follow",
+  "description": "STACK 0.1.0-test: a test build. Eight tracks, each with one sound from a single list; the keys play the selected track; four knobs shape it (pitch, a DJ filter, decay, level); a basic 16-step page. Nothing is saved yet.",
+  "tags": ["groovebox", "sampler"],
+  "install": "https://github.com/perawoga2-coder/stack",
+  "site": "https://github.com/perawoga2-coder/stack",
+  "source": "https://github.com/perawoga2-coder/stack",
+  "screenshot": "docs/screen-play.png",
+  "hardware": {
+    "models": ["FM-1"],
+    "flash": ["856014", "B36014"],
+    "features": ["usb-audio-in", "usb-audio-out", "velocity", "pressure", "screen-reader"]
+  },
+  "credits": "Built on fm1-base and felucca-bsp (MPL-2.0), from Felucca by Leo Kuroshita (Hugelton Instruments). Sounds: Maker Hip's Rock kit; the Hugelton Sample Pack by Leo Kuroshita (CC0); Versilian Studios VCSL (CC0); two sounds rendered from Felucca presets (temporary)."
+}

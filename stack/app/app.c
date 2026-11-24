@@ -1,0 +1,936 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Maker Hip
+ * Started from fm1-base's template/app.c, Copyright (C) 2026 Charles Vestal (MPL-2.0): the unity build's shape,
+ * app_say, the key scan with velocity and the text helpers follow it. Nothing here comes from Felucca or from the
+ * Burger Studio firmware (bs19); the sounds are audio only (app/SOUNDS.md). */
+/* STACK 0.1.0-test. Eight tracks, each with one sound picked from a single list; the keys play the selected track.
+ *   ALGORITHM  the track, 1..8 (it stops at the ends)
+ *   PRESETS    the selected track's sound, from one list that stops at its ends; nothing else changes
+ *   REC        UNDO SOUND: the sound the track had before the last turn of PRESETS (lit while there is one)
+ *   KNOB 1..4  the selected track's PITCH, FILTER (left low-pass, the middle off, right high-pass), DECAY, LEVEL
+ *   OCT- OCT+  the keys' octave, on release; both together are kept for the looper (not in this version)
+ *   PLAY       play / stop the steps;  SEQ  the step page and back (16 steps a track, the white keys)
+ * No randomness anywhere: the same press gives the same result. Nothing is saved, and nothing is written to the flash.
+ * Part of the unity build (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. */
+#include "fastmath.h"
+
+#define STACK_VERSION "0.1.0-TEST"
+
+/* ------------------------------------------------------------------ sounds --- */
+typedef struct {
+    const char *name;
+    const int16_t *d;
+    uint32_t n, ls, le;                  /* frames; the loop [ls, le) when SF_LOOP */
+    float rate, hz;                      /* its sample rate, and the pitch it sounds at that rate */
+    uint32_t flags;
+} sound_t;
+#define SF_LOOP 1u                       /* holds while the key is down */
+#define SF_DRUM 2u                       /* a hit: plays through, at its own pitch on every key */
+#define SF_TEMP 4u                       /* temporary: rendered audio, to be replaced after the listening test */
+#include "sounds_data.h"
+
+/* the one list PRESETS walks: EMPTY, the built-in sounds, then the three slots for samples from the app (empty in
+ * this version: the app's samples come in a later one) */
+#define NMY 3u
+#define NLIST (1u + NSOUNDS + NMY)
+static const sound_t *list_sound(uint32_t i) { return i >= 1u && i <= NSOUNDS ? &SOUNDS[i - 1u] : 0; }
+
+static void text_cat(char *d, const char *s)
+{
+    while (*d)
+        d++;
+    while (*s)
+        *d++ = *s++;
+    *d = 0;
+}
+
+static void int_text(int32_t v, char *b)     /* signed, no padding */
+{
+    char t[12];
+    int n = 0;
+    uint32_t u = (uint32_t)(v < 0 ? -v : v);
+    do
+        t[n++] = (char)('0' + u % 10u);
+    while ((u /= 10u) && n < 11);
+    if (v < 0)
+        *b++ = '-';
+    while (n)
+        *b++ = t[--n];
+    *b = 0;
+}
+
+static void list_name(uint32_t i, char *b)   /* "EMPTY", "ROCK KICK", "MY 1 (EMPTY)" */
+{
+    const sound_t *s = list_sound(i);
+    b[0] = 0;
+    if (s)
+        text_cat(b, s->name);
+    else if (!i)
+        text_cat(b, "EMPTY");
+    else {
+        char n[4];
+        int_text((int32_t)(i - NSOUNDS), n);
+        text_cat(b, "MY ");
+        text_cat(b, n);
+        text_cat(b, " (EMPTY)");
+    }
+}
+
+/* ------------------------------------------------------------------ tracks --- */
+#define NTRK 8u
+#define NSTEP 16u
+#define FILT_DEAD 3                      /* FILTER: -FILT_DEAD .. +FILT_DEAD is off (seven detents wide) */
+#define FILT_MAX (50 + FILT_DEAD)
+typedef struct {
+    volatile uint8_t sound;              /* its place in the list */
+    volatile int8_t pitch;               /* semitones, -24 .. +24 */
+    volatile int8_t filt;                /* -FILT_MAX (low-pass, closed) .. 0 off .. +FILT_MAX (high-pass) */
+    volatile uint8_t decay, level;       /* 0 .. 100 */
+} track_t;
+static track_t trk[NTRK];
+static volatile uint8_t step_on[NTRK][NSTEP];
+static volatile uint8_t step_note[NTRK][NSTEP];   /* MIDI note; a drum plays its own pitch */
+
+/* the transport: the main loop asks, the audio interrupt runs it */
+#define SEQ_BPM 120.0f                   /* fixed in this version */
+static volatile uint8_t seq_play_req;    /* 1 playing */
+static volatile uint8_t seq_step_now;    /* the step sounding (for the screen and the lights) */
+static uint8_t seq_running;
+static float seq_left;                   /* frames to the next step */
+static uint32_t seq_next;                /* the step that starts then */
+
+/* ------------------------------------------------------------------ voices --- */
+#define NVOICE 12u
+enum { V_OFF, V_HELD, V_REL };
+typedef struct {
+    const sound_t *s;
+    float pos, inc, env, att, vel;
+    uint32_t delay;                      /* frames into this block before it starts */
+    uint32_t life;                       /* a preview: frames until it lets go (0: none) */
+    uint32_t age;
+    uint8_t state, track, note, seq;
+} voice_t;
+static voice_t voice[NVOICE];
+static uint32_t voice_age;
+static volatile uint32_t voices_on;      /* for the screen and the tests */
+
+/* what each track's bus keeps between blocks */
+static struct {
+    float lp1, lp2, hp1, hp2, a, b, gain;
+} bus[NTRK];
+static float gain_now;
+
+/* notes from the main loop to the audio interrupt: track | note << 8 | velocity << 16 | kind << 24 */
+enum { QE_ON = 1, QE_OFF, QE_PING };
+#define EVQ 32u
+static volatile uint32_t evq[EVQ];
+static volatile uint32_t evq_w, evq_r;
+static void ev_put(uint32_t kind, uint32_t t, uint32_t note, uint32_t vel)
+{
+    uint32_t w = evq_w;
+    if (((w + 1u) % EVQ) == evq_r)
+        return;                          /* full: the note is dropped (32 between two blocks never happens by hand) */
+    evq[w] = (t & 0xFFu) | (note & 0x7Fu) << 8 | (vel & 0x7Fu) << 16 | kind << 24;
+    evq_w = (w + 1u) % EVQ;
+}
+
+static float semis(float st) { return fm_exp2f(st * (1.0f / 12.0f)); }
+
+static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay, uint32_t seq, uint32_t life)
+{
+    const sound_t *s = list_sound(trk[t].sound);
+    uint32_t i, k = 0, oldest = 0xFFFFFFFFu;
+    voice_t *v;
+    float st;
+    if (!s)
+        return;                          /* an empty track is silent */
+    for (i = 0; i < NVOICE; i++) {       /* a free voice, or else the oldest */
+        if (voice[i].state == V_OFF) {
+            k = i;
+            break;
+        }
+        if (voice[i].age < oldest) {
+            oldest = voice[i].age;
+            k = i;
+        }
+    }
+    v = &voice[k];
+    st = (float)trk[t].pitch;
+    if (!(s->flags & SF_DRUM))           /* a key's pitch against the sound's own */
+        st += 12.0f * fm_log2f(440.0f / s->hz) + (float)((int32_t)note - 69);
+    v->s = s;
+    v->pos = 0.0f;
+    v->inc = s->rate * (1.0f / 44100.0f) * semis(st);
+    if (v->inc > 16.0f)
+        v->inc = 16.0f;
+    v->env = 1.0f;
+    v->att = 0.0f;
+    v->vel = 0.25f + 0.75f * (float)vel * (1.0f / 127.0f);
+    v->delay = delay;
+    v->life = life;
+    v->age = ++voice_age;
+    v->track = (uint8_t)t;
+    v->note = (uint8_t)note;
+    v->seq = (uint8_t)seq;
+    v->state = V_HELD;
+}
+
+static void voice_release(uint32_t t, uint32_t note, uint32_t seq)
+{
+    uint32_t i;
+    for (i = 0; i < NVOICE; i++) {
+        voice_t *v = &voice[i];
+        if (v->state == V_HELD && v->track == t && v->seq == seq && (seq || v->note == note) &&
+            !(v->s->flags & SF_DRUM))
+            v->state = V_REL;
+    }
+}
+
+static void midi_in(void)                    /* audio interrupt: MIDI in plays the selected track */
+{
+    uint32_t pkt;
+    int port;
+    extern volatile uint8_t ui_sel_isr;
+    while (plat_midi_in(&pkt, &port)) {
+        uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24;
+        if ((st & 0xF0u) == 0x90u && d2)
+            voice_start(ui_sel_isr, d1, d2, 0, 0, 0);
+        else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u)
+            voice_release(ui_sel_isr, d1, 0);
+    }
+}
+volatile uint8_t ui_sel_isr;                 /* the selected track, as the audio interrupt sees it */
+
+static void seq_fire(uint32_t step, uint32_t delay)
+{
+    uint32_t t;
+    for (t = 0; t < NTRK; t++) {
+        voice_release(t, 0, 1);              /* the step before lets go */
+        if (step_on[t][step])
+            voice_start(t, step_note[t][step], 100, delay, 1, 0);
+    }
+    seq_step_now = (uint8_t)step;
+}
+
+static void seq_block(uint32_t n)
+{
+    const float step_frames = 44100.0f * 60.0f / (SEQ_BPM * 4.0f);
+    if (seq_play_req && !seq_running) {      /* PLAY: from step 1, now */
+        seq_running = 1;
+        seq_next = 0;
+        seq_left = 0.0f;
+    } else if (!seq_play_req && seq_running) {
+        uint32_t t;
+        seq_running = 0;
+        for (t = 0; t < NTRK; t++)
+            voice_release(t, 0, 1);
+    }
+    if (!seq_running)
+        return;
+    while (seq_left < (float)n) {
+        seq_fire(seq_next, (uint32_t)seq_left);
+        seq_next = (seq_next + 1u) % NSTEP;
+        seq_left += step_frames;
+    }
+    seq_left -= (float)n;
+}
+
+static float tb[APP_BLOCK];                  /* one track's bus */
+static float mix[APP_BLOCK];
+
+static void voice_render(voice_t *v, uint32_t n, float dcoef, float rcoef)
+{
+    const sound_t *s = v->s;
+    const int16_t *d = s->d;
+    uint32_t i = v->delay, loop = s->flags & SF_LOOP;
+    float pos = v->pos, inc = v->inc, env = v->env, att = v->att, amp = v->vel * (0.5f / 32768.0f);
+    float le = (float)s->le, ll = (float)(s->le - s->ls), end = (float)(s->n - 1u);
+    v->delay = 0;
+    for (; i < n; i++) {
+        uint32_t ip, iq;
+        float fr, x;
+        if (loop) {
+            while (pos >= le)
+                pos -= ll;
+        } else if (pos >= end) {
+            v->state = V_OFF;
+            break;
+        }
+        ip = (uint32_t)pos;
+        fr = pos - (float)ip;
+        iq = ip + 1u;
+        if (loop && iq >= s->le)
+            iq = s->ls;
+        x = (float)d[ip] + ((float)d[iq] - (float)d[ip]) * fr;
+        if (att < 1.0f)
+            att += 1.0f / 48.0f;             /* ~1 ms in: no click on a sound that starts away from zero */
+        env *= v->state == V_REL ? rcoef : dcoef;
+        tb[i] += x * amp * env * (att < 1.0f ? att : 1.0f);
+        pos += inc;
+        if (v->life && !--v->life && v->state == V_HELD)
+            v->state = V_REL;
+        if (env < 0.0005f) {
+            v->state = V_OFF;
+            break;
+        }
+    }
+    v->pos = pos;
+    v->env = env;
+    v->att = att;
+}
+
+static void render_part(int32_t *lr, uint32_t n, float gain)
+{
+    uint32_t t, i, k, on = 0;
+    uint32_t r = evq_r;
+    while (r != evq_w) {                     /* the keys' notes since the last block */
+        uint32_t e = evq[r], kind = e >> 24, tr = e & 0xFFu, note = (e >> 8) & 0x7Fu, vel = (e >> 16) & 0x7Fu;
+        if (kind == QE_ON)
+            voice_start(tr, note, vel, 0, 0, 0);
+        else if (kind == QE_PING)
+            voice_start(tr, note, vel, 0, 0, 8820);   /* a step's note heard for 0.2 s */
+        else
+            voice_release(tr, note, 0);
+        r = (r + 1u) % EVQ;
+    }
+    evq_r = r;
+    midi_in();
+    seq_block(n);
+    for (i = 0; i < n; i++)
+        mix[i] = 0.0f;
+    for (t = 0; t < NTRK; t++) {
+        const sound_t *s = list_sound(trk[t].sound);
+        int32_t f = trk[t].filt;
+        float kd = (float)trk[t].decay, lv = (float)trk[t].level * 0.01f;
+        float dcoef = 1.0f, rcoef, a_t = 1.0f, b_t = 0.0f, g_t = lv * lv, a = bus[t].a, b = bus[t].b, g = bus[t].gain;
+        float lp1 = bus[t].lp1, lp2 = bus[t].lp2, hp1 = bus[t].hp1, hp2 = bus[t].hp2;
+        uint32_t any = 0;
+        /* DECAY: a hit fades over 20 ms .. 1.9 s (100: not at all); a held sound lets go over 10 ms .. 1 s */
+        if (s && (s->flags & SF_DRUM) && kd < 100.0f)
+            dcoef = fm_expf(-1.0f / (0.020f * fm_exp2f(kd * 0.066f) * 44100.0f));
+        rcoef = fm_expf(-1.0f / (0.010f * fm_exp2f(kd * 0.066f) * 44100.0f));
+        /* FILTER: left of the middle a low-pass closing from 16 kHz to 125 Hz, right a high-pass opening 30 Hz .. 5.4 kHz */
+        if (f < -FILT_DEAD)
+            a_t = 1.0f - fm_expf(-6.2831853f * 16000.0f * fm_exp2f(-(float)(-f - FILT_DEAD) * 0.14f) * (1.0f / 44100.0f));
+        if (f > FILT_DEAD)
+            b_t = 1.0f - fm_expf(-6.2831853f * 30.0f * fm_exp2f((float)(f - FILT_DEAD) * 0.15f) * (1.0f / 44100.0f));
+        for (i = 0; i < n; i++)
+            tb[i] = 0.0f;
+        for (k = 0; k < NVOICE; k++)
+            if (voice[k].state != V_OFF && voice[k].track == t) {
+                voice_render(&voice[k], n, dcoef, rcoef);
+                any = 1;
+                on++;
+            }
+        if (!any && fm_fabsf(lp2) < 1e-6f && fm_fabsf(hp2) < 1e-6f) {
+            bus[t].a = a_t;                  /* silent: nothing to filter, the knobs' values taken at once */
+            bus[t].b = b_t;
+            bus[t].gain = g_t;
+            bus[t].lp1 = bus[t].lp2 = bus[t].hp1 = bus[t].hp2 = 0.0f;
+            continue;
+        }
+        for (i = 0; i < n; i++) {
+            float x = tb[i];
+            a += (a_t - a) * 0.004f;         /* the knobs glide: no step at a block's edge */
+            b += (b_t - b) * 0.004f;
+            g += (g_t - g) * 0.004f;
+            lp1 += a * (x - lp1);
+            lp2 += a * (lp1 - lp2);
+            x = lp2;
+            hp1 += b * (x - hp1);
+            x -= hp1;
+            hp2 += b * (x - hp2);
+            x -= hp2;
+            mix[i] += x * g;
+        }
+        bus[t].a = a;
+        bus[t].b = b;
+        bus[t].gain = g;
+        bus[t].lp1 = fm_flush(lp1);
+        bus[t].lp2 = fm_flush(lp2);
+        bus[t].hp1 = fm_flush(hp1);
+        bus[t].hp2 = fm_flush(hp2);
+    }
+    voices_on = on;
+    for (i = 0; i < n; i++) {
+        float s;
+        gain_now += (gain - gain_now) * 0.004f;      /* ~5 ms: turning MASTER does not click */
+        s = fm_clampf(mix[i], -1.0f, 1.0f) * gain_now;
+        lr[2 * i] = (int32_t)s;
+        lr[2 * i + 1] = (int32_t)s;
+    }
+}
+
+void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
+{
+    float gain = (float)master_q12 / 4096.0f * 8300000.0f;
+    while (n) {                              /* (a block is APP_BLOCK frames; longer ones in parts) */
+        uint32_t m = n > APP_BLOCK ? APP_BLOCK : n;
+        render_part(lr, m, gain);
+        lr += 2u * m;
+        n -= m;
+    }
+}
+
+void app_panic(void)
+{
+    uint32_t i;
+    seq_play_req = 0;
+    for (i = 0; i < NVOICE; i++)
+        voice[i].state = V_OFF;
+}
+
+/* ------------------------------------------------------------------- state --- */
+static void defaults(void)
+{
+    /* tracks 1..6 start with a built-in sound, 7 and 8 empty; the names are looked up, so the list may change */
+    static const char *const START[NTRK] = {"ROCK KICK", "ROCK SNARE", "ROCK HAT", "SUB BASS", "PIANO", "HG PLUCK", 0, 0};
+    uint32_t t, i, k;
+    for (t = 0; t < NTRK; t++) {
+        trk[t].sound = 0;
+        for (i = 0; START[t] && i < NSOUNDS; i++) {
+            for (k = 0; START[t][k] && START[t][k] == SOUNDS[i].name[k]; k++)
+                ;
+            if (!START[t][k] && !SOUNDS[i].name[k])
+                trk[t].sound = (uint8_t)(i + 1u);
+        }
+        trk[t].pitch = 0;
+        trk[t].filt = 0;
+        trk[t].decay = list_sound(trk[t].sound) && !(list_sound(trk[t].sound)->flags & SF_DRUM) ? 50 : 100;
+        trk[t].level = 80;
+        for (i = 0; i < NSTEP; i++) {
+            step_on[t][i] = 0;
+            step_note[t][i] = 60;
+        }
+    }
+}
+
+void app_init(void) { defaults(); }
+
+/* --------------------------------------------------------------------- UI --- */
+enum { PAGE_PLAY, PAGE_STEP };
+static struct {
+    char msg[2][28];                     /* a short message over the header */
+    uint32_t msg_until;
+    uint32_t keys, btn;                  /* held at the last input */
+    uint8_t sel;                         /* the selected track */
+    uint8_t page;
+    int8_t octave;                       /* -2 .. +2 */
+    uint8_t oct_chord;                   /* both OCT buttons went down together: neither release shifts */
+    uint8_t undo_ok, undo_trk, undo_sound;   /* UNDO SOUND: the track and the sound to put back */
+    uint32_t undo_t;                     /* the last turn of PRESETS (a pause starts a new undo) */
+    int8_t held_step;                    /* the step page: the step whose key is down (-1 none) */
+    uint8_t held_turned;                 /* KNOB 1 turned while it was held: letting go does not toggle it */
+    uint8_t note_of[NKEYS];              /* the note each held key started (the octave may change under it) */
+    uint8_t trk_of[NKEYS];
+    int8_t hot;                          /* the knob turned last (0..3), lit for a moment */
+    uint32_t hot_t;
+    uint8_t redraw;
+} ui;
+
+void app_say(const char *a, const char *b)
+{
+    uint32_t i;
+    char t[64];
+    for (i = 0; i < 27u && a && a[i]; i++)
+        ui.msg[0][i] = a[i];
+    ui.msg[0][i] = 0;
+    for (i = 0; i < 27u && b && b[i]; i++)
+        ui.msg[1][i] = b[i];
+    ui.msg[1][i] = 0;
+    ui.msg_until = plat_ms() + 1600u;
+    ui.redraw = 1;
+    if (ann_on()) {                          /* and to a screen reader (announce.c, fm1-reader) */
+        t[0] = 0;
+        text_cat(t, ui.msg[0]);
+        if (ui.msg[1][0]) {
+            text_cat(t, " ");
+            text_cat(t, ui.msg[1]);
+        }
+        ann_say(t, 0, ANN_NOW);
+    }
+}
+
+static void note_name(int32_t note, char *b)
+{
+    static const char *const N[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    char o[12];
+    b[0] = 0;
+    text_cat(b, N[note % 12]);
+    int_text(note / 12 - 1, o);
+    text_cat(b, o);
+}
+
+static void trk_text(uint32_t t, char *b)    /* "T3" */
+{
+    b[0] = 'T';
+    b[1] = (char)('1' + t);
+    b[2] = 0;
+}
+
+static void filt_text(int32_t f, char *b)    /* "OFF", "LP 12", "HP 40" */
+{
+    char n[8];
+    b[0] = 0;
+    if (f >= -FILT_DEAD && f <= FILT_DEAD) {
+        text_cat(b, "OFF");
+        return;
+    }
+    text_cat(b, f < 0 ? "LP " : "HP ");
+    int_text(f < 0 ? -f - FILT_DEAD : f - FILT_DEAD, n);
+    text_cat(b, n);
+}
+
+static void speak(void)                      /* a screen reader that asks hears where we are */
+{
+    char t[96], n[28];
+    if (ann_on() && ann_where()) {
+        t[0] = 0;
+        text_cat(t, APP_NAME ". TRACK ");
+        int_text(ui.sel + 1, n);
+        text_cat(t, n);
+        text_cat(t, ". ");
+        list_name(trk[ui.sel].sound, n);
+        text_cat(t, n);
+        ann_say(t, 0, ANN_NOW);
+    }
+    ann_tick(plat_ms());
+}
+
+/* PRESETS: the selected track's sound, one place along the list; the list stops at its ends. Only the sound changes:
+ * the knobs' values, the steps and the other tracks stay. The screen says the old and the new */
+static void sound_turn(int32_t e)
+{
+    uint32_t t = ui.sel, old = trk[t].sound, now = plat_ms();
+    int32_t to = clamp((int32_t)old + e, 0, (int32_t)NLIST - 1);
+    char a[28], b[28], m[28];
+    if ((uint32_t)to == old) {
+        app_say(e < 0 ? "START OF LIST" : "END OF LIST", "");
+        return;
+    }
+    if (!(ui.undo_ok && ui.undo_trk == t && now - ui.undo_t < 1500u)) {   /* a new turn: what REC puts back */
+        ui.undo_ok = 1;
+        ui.undo_trk = (uint8_t)t;
+        ui.undo_sound = (uint8_t)old;
+    }
+    ui.undo_t = now;
+    trk[t].sound = (uint8_t)to;
+    list_name(ui.undo_sound, a);             /* (the sound before the turn began: what REC puts back) */
+    list_name((uint32_t)to, b);
+    m[0] = 0;
+    text_cat(m, "> ");
+    text_cat(m, b);
+    app_say(a, m);
+}
+
+static void sound_undo(void)                 /* REC: UNDO SOUND */
+{
+    char a[28], b[28], m[28];
+    uint32_t t;
+    if (!ui.undo_ok) {
+        app_say("NOTHING TO UNDO", "");
+        return;
+    }
+    t = ui.undo_trk;
+    list_name(trk[t].sound, a);
+    list_name(ui.undo_sound, b);
+    trk[t].sound = ui.undo_sound;
+    ui.undo_ok = 0;
+    ui.sel = (uint8_t)t;                     /* (the track it was on: shown, so the undo is seen) */
+    ui_sel_isr = ui.sel;
+    m[0] = 0;
+    text_cat(m, "UNDO T");
+    b[27] = 0;
+    {
+        char n[4];
+        int_text((int32_t)t + 1, n);
+        text_cat(m, n);
+        text_cat(m, ": ");
+        text_cat(m, b);
+    }
+    (void)a;
+    app_say(m, "");
+}
+
+static void octave_step(int32_t d)
+{
+    int32_t o = clamp(ui.octave + d, -2, 2);
+    char t[4];
+    if (o == ui.octave) {
+        app_say("OCTAVE", d < 0 ? "LOWEST" : "HIGHEST");
+        return;
+    }
+    ui.octave = (int8_t)o;
+    t[0] = o < 0 ? '-' : '+';
+    t[1] = (char)('0' + (o < 0 ? -o : o));
+    t[2] = 0;
+    app_say("OCTAVE", t);
+}
+
+static void knob_turn(uint32_t k, int32_t e)
+{
+    track_t *t = &trk[ui.sel];
+    char a[28], n[12];
+    a[0] = 0;
+    if (ui.page == PAGE_STEP && ui.held_step >= 0) {
+        if (k == 0u) {                       /* a step held, KNOB 1: its note; the step is set */
+            uint32_t s = (uint32_t)ui.held_step;
+            int32_t old = step_note[ui.sel][s], to = clamp(old + e, 24, 96);
+            const sound_t *snd = list_sound(t->sound);
+            step_note[ui.sel][s] = (uint8_t)to;
+            step_on[ui.sel][s] = 1;
+            ui.held_turned = 1;
+            if (to != old)
+                ev_put(QE_PING, ui.sel, (uint32_t)to, 100);
+            text_cat(a, "STEP ");
+            int_text((int32_t)s + 1, n);
+            text_cat(a, n);
+            text_cat(a, ": ");
+            note_name(to, n);
+            text_cat(a, snd && (snd->flags & SF_DRUM) ? "DRUM" : n);
+            app_say(a, "");
+        }
+        return;
+    }
+    ui.hot = (int8_t)k;
+    ui.hot_t = plat_ms();
+    if (k == 0u) {
+        t->pitch = (int8_t)clamp(t->pitch + e, -24, 24);
+    } else if (k == 1u) {
+        t->filt = (int8_t)clamp(t->filt + e, -FILT_MAX, FILT_MAX);
+    } else if (k == 2u) {
+        t->decay = (uint8_t)clamp(t->decay + e, 0, 100);
+    } else {
+        t->level = (uint8_t)clamp(t->level + e, 0, 100);
+    }
+    ui.redraw = 1;
+}
+
+static void input(void)
+{
+    static const uint8_t WK[16] = PLAT_WHITE_KEYS;
+    uint32_t keys, btn = plat_buttons(), k, pressed, released, lit_keys = 0, lit_btn;
+    int32_t e;
+    touch_poll();
+    keys = touch_keys();
+    pressed = btn & ~ui.btn;
+    released = ~btn & ui.btn;
+
+    /* the keys: on the play page they play the selected track; on the step page the 16 white keys are the steps */
+    for (k = 0; k < NKEYS; k++) {
+        uint32_t bit = 1u << k, down = (keys & bit) && !(ui.keys & bit), up = !(keys & bit) && (ui.keys & bit);
+        if (ui.page == PAGE_STEP) {
+            uint32_t s;
+            for (s = 0; s < 16u && WK[s] != k; s++)
+                ;
+            if (s == 16u)
+                continue;                    /* (the black keys have no job on the step page) */
+            if (down && ui.held_step < 0) {
+                ui.held_step = (int8_t)s;
+                ui.held_turned = 0;
+                ui.redraw = 1;
+            } else if (up && ui.held_step == (int8_t)s) {
+                if (!ui.held_turned) {       /* a tap: the step on or off */
+                    char a[28], n[8];
+                    step_on[ui.sel][s] = (uint8_t)!step_on[ui.sel][s];
+                    a[0] = 0;
+                    text_cat(a, "STEP ");
+                    int_text((int32_t)s + 1, n);
+                    text_cat(a, n);
+                    app_say(a, step_on[ui.sel][s] ? "ON" : "OFF");
+                }
+                ui.held_step = -1;
+                ui.redraw = 1;
+            }
+            continue;
+        }
+        if (down) {
+            uint32_t v = touch_vel(k);
+            int32_t note = clamp(53 + (int32_t)k + 12 * ui.octave, 0, 127);
+            ui.note_of[k] = (uint8_t)note;
+            ui.trk_of[k] = ui.sel;
+            ev_put(QE_ON, ui.sel, (uint32_t)note, v ? v : 100u);
+            plat_midi_send(0x09u | 0x90u << 8 | (uint32_t)note << 16 | (v ? v : 100u) << 24, TO_USB);
+        } else if (up) {
+            ev_put(QE_OFF, ui.trk_of[k], ui.note_of[k], 0);
+            plat_midi_send(0x08u | 0x80u << 8 | (uint32_t)ui.note_of[k] << 16, TO_USB);
+        }
+    }
+
+    /* OCT- and OCT+: the octave moves when the button is let go. Both down together is the looper's chord (kept for
+     * a later version): then neither release moves the octave, whichever finger came first */
+    if ((btn >> B_OCTDN & 1u) && (btn >> B_OCTUP & 1u) && !ui.oct_chord) {
+        ui.oct_chord = 1;
+        app_say("LOOPER", "NOT IN THIS VERSION");
+    }
+    if (released >> B_OCTDN & 1u) {
+        if (!ui.oct_chord)
+            octave_step(-1);
+    }
+    if (released >> B_OCTUP & 1u) {
+        if (!ui.oct_chord)
+            octave_step(1);
+    }
+    if (ui.oct_chord && !(btn >> B_OCTDN & 1u) && !(btn >> B_OCTUP & 1u))
+        ui.oct_chord = 0;
+
+    for (k = 0; k < NB; k++) {
+        static const char *const BTN_NAME[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
+                                                 "PLAY", "REC", "OCT-", "OCT+"};
+        if (!(pressed >> k & 1u) || k == B_OCTDN || k == B_OCTUP)
+            continue;
+        if (k == B_REC) {
+            sound_undo();
+        } else if (k == B_PLAY) {
+            seq_play_req = (uint8_t)!seq_play_req;
+            app_say(seq_play_req ? "PLAY" : "STOP", "");
+        } else if (k == B_SEQ) {
+            ui.page = ui.page == PAGE_STEP ? PAGE_PLAY : PAGE_STEP;
+            ui.held_step = -1;
+            for (e = 0; e < (int32_t)NKEYS; e++)        /* keys held across the change let go */
+                if (ui.keys >> e & 1u)
+                    ev_put(QE_OFF, ui.trk_of[e], ui.note_of[e], 0);
+            app_say(ui.page == PAGE_STEP ? "STEP PAGE" : "TRACKS PAGE", "");
+        } else {
+            app_say(BTN_NAME[k], "NOT IN THIS VERSION");   /* (never a silent press) */
+        }
+    }
+
+    if ((e = plat_enc(EN_ALGO)) != 0) {      /* ALGORITHM: the track; one detent a track, it stops at 1 and 8 */
+        int32_t to = clamp((int32_t)ui.sel + e, 0, (int32_t)NTRK - 1);
+        if ((uint32_t)to != ui.sel) {
+            ui.sel = (uint8_t)to;
+            ui_sel_isr = ui.sel;
+            ui.held_step = -1;
+            ui.redraw = 1;
+        }
+    }
+    if ((e = plat_enc(EN_PRESET)) != 0)
+        sound_turn(e);
+    for (k = 0; k < 4u; k++)
+        if ((e = plat_enc((int)(EN_K1 + k))) != 0)
+            knob_turn(k, e);
+    plat_enc(EN_SELECT);                     /* (no job in this version: its turns are not kept) */
+
+    if (keys != ui.keys || btn != ui.btn)
+        ui.redraw = 1;
+    ui.keys = keys;
+    ui.btn = btn;
+
+    /* the lights: REC only while there is a sound to undo; SEQ on the step page; PLAY while playing */
+    lit_btn = (ui.undo_ok ? 1u << B_REC : 0u) | (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
+              (seq_play_req ? 1u << B_PLAY : 0u);
+    if (ui.page == PAGE_STEP) {
+        for (k = 0; k < 16u; k++)
+            if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
+                lit_keys |= 1u << WK[k];
+    } else {
+        lit_keys = keys;
+    }
+    plat_glow(1);
+    plat_leds(lit_btn, lit_keys);
+}
+
+void app_input_only(void) { input(); }
+
+/* ------------------------------------------------------------------ screen --- */
+#define C_ORANGE RGB(255, 122, 47)
+
+static void draw_header(void)
+{
+    char t[28];
+    uint32_t now = plat_ms();
+    cv_begin(240, 28, C_BLACK);
+    if (now < ui.msg_until) {
+        int32_t x = cv_text(6, 5, &FONT_B, ui.msg[0], C_WHITE);
+        cv_text(x + 6, 5, &FONT_B, ui.msg[1], C_HI);
+    } else {
+        int32_t x = cv_text(6, 5, &FONT_B, APP_NAME, C_ORANGE);
+        cv_text(x + 8, 8, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : "TRACKS", C_GRAY);
+        t[0] = 0;
+        text_cat(t, "OCT ");
+        t[4] = ui.octave < 0 ? '-' : '+';
+        t[5] = (char)('0' + (ui.octave < 0 ? -ui.octave : ui.octave));
+        t[6] = 0;
+        cv_text(150, 8, &FONT_XS, t, C_GRAY);
+        cv_text(200, 8, &FONT_XS, seq_play_req ? "PLAY" : "STOP", seq_play_req ? C_HI : C_DIM);
+    }
+    cv_rect(0, 27, 240, 1, C_LINE);
+    cv_blit(0, 0);
+}
+
+static void draw_tracks(void)                /* the play page: the eight tracks, the selected one bright */
+{
+    uint32_t half, r;
+    char t[28], n[4];
+    for (half = 0; half < 2u; half++) {
+        cv_begin(240, 80, C_BLACK);
+        for (r = 0; r < 4u; r++) {
+            uint32_t k = half * 4u + r, sel = k == ui.sel;
+            const sound_t *s = list_sound(trk[k].sound);
+            int32_t y = (int32_t)r * 20;
+            if (sel)
+                cv_rect(0, y, 240, 19, C_ORANGE);
+            trk_text(k, n);
+            cv_text(6, y + 2, &FONT_B, n, sel ? C_BLACK : C_GRAY);
+            list_name(trk[k].sound, t);
+            cv_text(40, y + 2, sel ? &FONT_B : &FONT_S, t, sel ? C_BLACK : s ? C_WHITE : C_DIM);
+            if (s) {                         /* its level, a short bar at the right */
+                int32_t w = (int32_t)trk[k].level * 30 / 100;
+                cv_rect(204, y + 8, 30, 3, sel ? C_BLACK : C_LINE);
+                cv_rect(204, y + 8, w, 3, sel ? C_WHITE : C_AMB);
+            }
+        }
+        cv_blit(0, 28 + half * 80u);
+    }
+}
+
+static void draw_steps(void)                 /* the step page: the selected track's 16 steps, two rows of eight */
+{
+    uint32_t i, drum;
+    char t[28], n[8];
+    const sound_t *s = list_sound(trk[ui.sel].sound);
+    drum = s && (s->flags & SF_DRUM);
+    cv_begin(240, 80, C_BLACK);
+    trk_text(ui.sel, n);
+    cv_text(6, 4, &FONT_B, n, C_ORANGE);
+    list_name(trk[ui.sel].sound, t);
+    cv_text(40, 4, &FONT_B, t, s ? C_WHITE : C_DIM);
+    cv_text(6, 28, &FONT_XS, s ? "WHITE KEYS 1-16: STEP ON / OFF" : "EMPTY TRACK: PICK A SOUND FIRST", C_GRAY);
+    cv_text(6, 46, &FONT_XS, drum ? "A DRUM PLAYS ITS OWN PITCH" : "HOLD A STEP + KNOB 1: ITS NOTE", C_GRAY);
+    cv_blit(0, 28);
+    cv_begin(240, 80, C_BLACK);
+    for (i = 0; i < NSTEP; i++) {
+        int32_t x = 4 + (int32_t)(i % 8u) * 29, y = 2 + (int32_t)(i / 8u) * 38;
+        uint32_t on = step_on[ui.sel][i], now = seq_play_req && seq_step_now == i, held = ui.held_step == (int8_t)i;
+        uint16_t c = on ? C_ORANGE : C_LINE;
+        cv_rect(x, y, 27, 34, held ? C_WHITE : now ? C_HI : c);
+        if (!on || held || now)
+            cv_rect(x + 2, y + 2, 23, 30, on ? C_ORANGE : C_BLACK);
+        int_text((int32_t)i + 1, n);
+        cv_text(x + 4, y + 3, &FONT_XS, n, on ? C_BLACK : C_DIM);
+        if (on && !drum) {
+            note_name(step_note[ui.sel][i], n);
+            cv_text(x + 3, y + 17, &FONT_XS, n, C_BLACK);
+        }
+    }
+    cv_blit(0, 108);
+}
+
+static void draw_knobs(void)                 /* the four knobs of the selected track, and what the controls do */
+{
+    static const char *const NAME[4] = {"PITCH", "FILTER", "DECAY", "LEVEL"};
+    const track_t *t = &trk[ui.sel];
+    uint32_t k, now = plat_ms();
+    char v[12];
+    cv_begin(240, 52, C_BLACK);
+    cv_rect(0, 0, 240, 1, C_LINE);
+    for (k = 0; k < 4u; k++) {
+        int32_t x = 4 + (int32_t)k * 59;
+        int hot = ui.hot == (int8_t)k && now - ui.hot_t < 900u;
+        v[0] = 0;
+        if (k == 0u) {
+            if (t->pitch > 0)
+                text_cat(v, "+");
+            int_text(t->pitch, v + (t->pitch > 0 ? 1 : 0));
+        } else if (k == 1u) {
+            filt_text(t->filt, v);
+        } else {
+            int_text(k == 2u ? t->decay : t->level, v);
+        }
+        cv_text(x, 3, &FONT_XS, NAME[k], C_GRAY);
+        cv_text(x, 16, &FONT_B, v, hot ? C_WHITE : C_HI);
+        if (k == 1u) {                       /* FILTER: where it stands, the off zone marked in the middle */
+            int32_t c = x + 27, p = c + (int32_t)t->filt * 26 / FILT_MAX;
+            cv_rect(x, 35, 55, 1, C_DIM);
+            cv_rect(c - 2, 33, 5, 5, C_LINE);
+            cv_rect(p - 1, 32, 3, 7, t->filt >= -FILT_DEAD && t->filt <= FILT_DEAD ? C_GRAY : C_ORANGE);
+        }
+    }
+    cv_text(4, 40, &FONT_T, ui.undo_ok ? "REC: UNDO SOUND" : "ALGO: TRACK  PRESETS: SOUND", ui.undo_ok ? C_WHITE : C_DIM);
+    cv_blit(0, 188);
+}
+
+static void draw(void)
+{
+    draw_header();
+    if (ui.page == PAGE_STEP)
+        draw_steps();
+    else
+        draw_tracks();
+    draw_knobs();
+}
+
+void app_ui_init(void)
+{
+    touch_on(1);                             /* velocity: the keys' readings on */
+    plat_usb_audio_full(1);                  /* USB audio at full level, whatever MASTER says */
+    lcd_fill(0, 0, 240, 240, C_BLACK);
+    ui.held_step = -1;
+    ui.hot = -1;
+    ui_sel_isr = ui.sel;
+    ui.redraw = 1;
+    app_say("STACK", STACK_VERSION);
+}
+
+void app_frame(void)
+{
+    static uint32_t last_step = 255, last_play = 2;
+    uint32_t now = plat_ms();
+    input();
+    speak();
+    if (ui.msg_until && now >= ui.msg_until) {
+        ui.msg_until = 0;
+        ui.redraw = 1;
+    }
+    if (ui.hot >= 0 && now - ui.hot_t >= 900u) {
+        ui.hot = -1;
+        ui.redraw = 1;
+    }
+    if (ui.undo_ok && now - ui.undo_t >= 1500u && now - ui.undo_t < 1600u)
+        ui.redraw = 1;
+    if (seq_play_req != last_play || (ui.page == PAGE_STEP && seq_play_req && seq_step_now != last_step)) {
+        last_play = seq_play_req;
+        last_step = seq_step_now;
+        ui.redraw = 1;
+    }
+    if (ui.redraw) {
+        ui.redraw = 0;
+        draw();
+    }
+}
+
+#ifdef PLAT_HOST
+int app_expect(const char *what, int *got)
+{
+    if (!strcmp(what, "track"))
+        *got = ui.sel + 1;
+    else if (!strcmp(what, "sound"))         /* the selected track's place in the list */
+        *got = trk[ui.sel].sound;
+    else if (!strcmp(what, "nlist"))
+        *got = (int)NLIST;
+    else if (!strcmp(what, "octave"))
+        *got = ui.octave;
+    else if (!strcmp(what, "undo"))
+        *got = ui.undo_ok;
+    else if (!strcmp(what, "pitch"))
+        *got = trk[ui.sel].pitch;
+    else if (!strcmp(what, "filt"))
+        *got = trk[ui.sel].filt;
+    else if (!strcmp(what, "decay"))
+        *got = trk[ui.sel].decay;
+    else if (!strcmp(what, "level"))
+        *got = trk[ui.sel].level;
+    else if (!strcmp(what, "page"))
+        *got = ui.page;
+    else if (!strcmp(what, "playing"))
+        *got = seq_play_req;
+    else if (!strcmp(what, "voices"))
+        *got = (int)voices_on;
+    else if (!strncmp(what, "step", 4))      /* stepN: step N (1..16) of the selected track, 0 off or its note */
+        *got = step_on[ui.sel][(atoi(what + 4) - 1) & 15] ? step_note[ui.sel][(atoi(what + 4) - 1) & 15] : 0;
+    else
+        return 0;
+    return 1;
+}
+#endif

@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MPL-2.0
+# STACK: the words for a screen reader (fm1-reader): the text on the screen <TAB> what to say.
+# url: https://perawoga2-coder.github.io/stack/words/
+STACK	stack
+UNDO SOUND	undo sound
+HG	hugelton
