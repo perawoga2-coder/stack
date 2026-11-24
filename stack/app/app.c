@@ -174,10 +174,49 @@ typedef struct {
     volatile int8_t env_r;               /* RELEASE ENV_AUTO, or 0 .. 100: stops at once (4 ms) .. a tail of about 1 s */
     volatile uint8_t env_s;              /* SUSTAIN 0 .. 100: the level a held sound settles at, at DECAY's pace */
     volatile uint8_t env_v;              /* VELOCITY 0 .. 100: how much the finger's weight changes the loudness */
+    /* the LFO (the LFO page): one a track, on the whole track. AMOUNT 0 is off: the track is as without one */
+    volatile uint8_t lfo_a;              /* AMOUNT 0 .. 100 */
+    volatile uint8_t lfo_r;              /* RATE: a division of the tempo, LFO_RATE_NAME */
+    volatile uint8_t lfo_t;              /* TARGET: LFO_PITCH, LFO_FILTER, LFO_LEVEL, LFO_PAN */
+    volatile uint8_t lfo_s;              /* SHAPE: LFO_SHAPE_NAME */
     volatile uint8_t fx[2];              /* the effect in slot A and in slot B (fx.c FX_*) */
     volatile int8_t fxk[2];              /* their knobs, -FX_MAX .. 0 off .. +FX_MAX */
 } track_t;
 static track_t trk[NTRK];
+
+/* --- the LFO: a slow wave in time with the tempo that moves one thing of its track. PITCH (vibrato) starts again at
+ * each note of the track, from the middle and upwards; FILTER (wah), LEVEL (tremolo) and PAN keep to the bar while
+ * the pattern plays, so they fall on the beat the same way every time round. No shape is random --- */
+enum { LFO_PITCH, LFO_FILTER, LFO_LEVEL, LFO_PAN, NLFO_T };
+enum { LFO_SINE, LFO_TRI, LFO_SQUARE, LFO_SAWUP, LFO_SAWDN, NLFO_S };
+#define NLFO_R 11u
+#define LFO_R_START 6u                   /* 1/8 */
+static const char *const LFO_T_NAME[NLFO_T] = {"PITCH", "FILTER", "LEVEL", "PAN"};
+static const char *const LFO_T_WORD[NLFO_T] = {"VIBRATO", "WAH", "TREMOLO", "LEFT-RIGHT"};
+static const char *const LFO_S_NAME[NLFO_S] = {"SINE", "TRIANGLE", "SQUARE", "SAW UP", "SAW DOWN"};
+static const char *const LFO_R_NAME[NLFO_R] = {"4 BARS", "2 BARS", "1 BAR", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16",
+                                               "1/16T", "1/32"};
+/* a cycle's length in steps (sixteenths); T: three in the time of two */
+static const float LFO_R_STEPS[NLFO_R] = {64.0f, 32.0f, 16.0f, 8.0f, 4.0f, 8.0f / 3.0f, 2.0f, 4.0f / 3.0f, 1.0f,
+                                          2.0f / 3.0f, 0.5f};
+static float lfo_ph[NTRK];               /* where in its cycle each track's is, 0 .. 1 (the audio interrupt) */
+static uint8_t lfo_trig;                 /* tracks a note has just started on (PITCH starts again) */
+static float lfo_wave(uint32_t shape, float p)   /* -1 .. 1 at p of a cycle (any p >= 0) */
+{
+    p -= (float)(uint32_t)p;
+    switch (shape) {
+    case LFO_TRI:
+        return p < 0.25f ? 4.0f * p : p < 0.75f ? 2.0f - 4.0f * p : 4.0f * p - 4.0f;
+    case LFO_SQUARE:
+        return p < 0.5f ? 1.0f : -1.0f;
+    case LFO_SAWUP:
+        return 2.0f * p - 1.0f;
+    case LFO_SAWDN:
+        return 1.0f - 2.0f * p;
+    default:
+        return fm_sinf(6.2831853f * p);
+    }
+}
 static volatile uint8_t step_on[NTRK][NSTEP];
 static volatile uint8_t step_note[NTRK][NSTEP];   /* MIDI note; a drum plays its own pitch */
 
@@ -214,6 +253,7 @@ static volatile uint32_t voices_on;      /* for the screen and the tests */
 /* what each track's bus keeps between blocks */
 static struct {
     float lp1, lp2, hp1, hp2, a, b, gain;
+    float pan;                           /* the LFO's PAN as it glides: -1 left .. 0 .. 1 right */
 } bus[NTRK];
 static float gain_now;
 
@@ -293,6 +333,7 @@ static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay,
     voice_t *v;
     if (!s)
         return;                          /* an empty track is silent */
+    lfo_trig = (uint8_t)(lfo_trig | 1u << t);
     for (i = 0; i < NVOICE; i++) {       /* a free voice, or else the oldest */
         if (voice[i].state == V_OFF) {
             k = i;
@@ -401,6 +442,7 @@ static void seq_start_hook(void);            /* (the looper: its loop starts wit
 static float seq_xpos;                       /* following: the place in the pattern, in clock ticks (0 .. 96) */
 static uint8_t seq_ext;                      /* the last block followed a clock in */
 static float ck_left;                        /* leading: frames to the next clock tick out */
+static uint32_t seq_bars;                    /* the bars since the pattern started (the LFOs keep to four of them) */
 static float seq_phase, seq_dphase;          /* the place in the pattern at the block's start (0 .. 1) and a frame's share */
 static struct { float e; } seq_dbg;          /* (the simulator's checks: the furthest the place was from the clock's) */
 
@@ -618,6 +660,14 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
     evq_r = r;
     midi_in();
     seq_block(n);
+    {   /* (for the LFOs: the bars since the pattern started, counted where its place goes round) */
+        static float last;
+        if (!seq_running)
+            seq_bars = 0;
+        else if (seq_phase < last - 0.5f)
+            seq_bars++;
+        last = seq_running ? seq_phase : 0.0f;
+    }
     for (i = 0; i < n; i++)
         mixl[i] = mixr[i] = rec_in[i] = 0.0f;
     for (t = 0; t < NTRK; t++) {
@@ -627,6 +677,8 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         float dcoef = 1.0f, rcoef, a_t = 1.0f, b_t = 0.0f, g_t = lv * lv, a = bus[t].a, b = bus[t].b, g = bus[t].gain;
         float lp1 = bus[t].lp1, lp2 = bus[t].lp2, hp1 = bus[t].hp1, hp2 = bus[t].hp2;
         float fa[2], rate_t = 1.0f, dry = 1.0f;
+        float lfo_p0 = 0.0f, lfo_dp = 0.0f, lfo_d = 0.0f, lfo_v = 0.0f, pan_t = 0.0f;   /* the LFO this block */
+        uint32_t lfo_on = trk[t].lfo_a != 0u, lfo_to = trk[t].lfo_t, lfo_sh = trk[t].lfo_s;
         env_t ev;
         uint32_t any = 0, anyr = 0, ft[2], fs[2], q, loop8 = t == NTRK - 1u && lp.own;
         for (q = 0; q < 2u; q++) {               /* the two slots: what, which side, how much */
@@ -652,11 +704,50 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             ev.kd = 1.0f - fm_expf(-1.0f / (0.020f * fm_exp2f(kd * 0.066f) * 44100.0f));
             ev.rcoef = er < 0 ? rcoef : fm_expf(-1.0f / (0.004f * fm_exp2f((float)er * 0.08f) * 44100.0f));
         }
+        if (lfo_on) {                            /* the LFO: where it is in this block, and what it moves */
+            const uint32_t r = trk[t].lfo_r < NLFO_R ? trk[t].lfo_r : LFO_R_START;
+            lfo_dp = 1.0f / (LFO_R_STEPS[r] * ck_tick_frames() * 6.0f);
+            if (lfo_to == LFO_PITCH) {
+                if (lfo_trig >> t & 1u)
+                    lfo_ph[t] = 0.0f;            /* a note: the vibrato from its start */
+            } else if (seq_running) {            /* the pattern plays: on the bar */
+                const float at = ((float)(seq_bars & 3u) + seq_phase) * (float)NSTEP / LFO_R_STEPS[r];
+                lfo_ph[t] = at - (float)(uint32_t)at;
+            }
+            lfo_p0 = lfo_ph[t];
+            lfo_ph[t] = lfo_p0 + lfo_dp * (float)n;
+            lfo_ph[t] -= (float)(uint32_t)lfo_ph[t];
+            lfo_d = (float)trk[t].lfo_a * 0.01f;
+            lfo_v = lfo_wave(lfo_sh, lfo_p0 + lfo_dp * (float)n * 0.5f);
+            if (lfo_to == LFO_LEVEL)             /* tremolo: down from the track's level, to silence at 100 */
+                g_t *= 1.0f - lfo_d * (1.0f - lfo_v) * 0.5f;
+            else if (lfo_to == LFO_PAN)
+                pan_t = lfo_v * lfo_d;
+        }
+        lfo_trig = (uint8_t)(lfo_trig & ~(1u << t));
         /* FILTER: left of the middle a low-pass closing from 16 kHz to 125 Hz, right a high-pass opening 30 Hz .. 5.4 kHz */
+        if (lfo_on && lfo_to == LFO_FILTER) {
+            /* wah: the LFO moves FILTER's place, up to 36 of its detents (5 octaves of the low-pass) each way, on the
+             * side the knob is on; with the knob at OFF it is a low-pass that closes from open and comes back */
+            const float w = lfo_d * 36.0f;
+            float ff = (float)f;
+            if (f < -FILT_DEAD) {
+                ff = fm_clampf(ff + lfo_v * w, -(float)FILT_MAX, -(float)FILT_DEAD);
+            } else if (f > FILT_DEAD) {
+                ff = fm_clampf(ff + lfo_v * w, (float)FILT_DEAD, (float)FILT_MAX);
+            } else {
+                ff = -(float)FILT_DEAD - w * (1.0f - lfo_v) * 0.5f;
+            }
+            if (ff < 0.0f)
+                a_t = 1.0f - fm_expf(-6.2831853f * 16000.0f * fm_exp2f(-(-ff - (float)FILT_DEAD) * 0.14f) * (1.0f / 44100.0f));
+            else
+                b_t = 1.0f - fm_expf(-6.2831853f * 30.0f * fm_exp2f((ff - (float)FILT_DEAD) * 0.15f) * (1.0f / 44100.0f));
+        } else {
         if (f < -FILT_DEAD)
             a_t = 1.0f - fm_expf(-6.2831853f * 16000.0f * fm_exp2f(-(float)(-f - FILT_DEAD) * 0.14f) * (1.0f / 44100.0f));
         if (f > FILT_DEAD)
             b_t = 1.0f - fm_expf(-6.2831853f * 30.0f * fm_exp2f((float)(f - FILT_DEAD) * 0.15f) * (1.0f / 44100.0f));
+        }
         for (i = 0; i < n; i++)
             tb[i] = 0.0f;
         if (loop8) {                             /* track 8 as the looper: the loop is its sound (no voices) */
@@ -677,7 +768,22 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
                             rb[i] = 0.0f;
                         anyr = 1;
                     }
-                    voice_render(&voice[k], mine ? rb : tb, n, &ev, tape_rate[t]);
+                    if (lfo_on && lfo_to == LFO_PITCH) {
+                        /* vibrato: up to 2 semitones each way (the square of AMOUNT: fine at the low end), the pitch
+                         * set anew every 64 frames (1.5 ms) so that it bends and does not step */
+                        uint32_t c0;
+                        for (c0 = 0; c0 < n && voice[k].state != V_OFF; c0 += 64u) {
+                            const uint32_t m = n - c0 < 64u ? n - c0 : 64u;
+                            const float lv = lfo_wave(lfo_sh, lfo_p0 + lfo_dp * ((float)c0 + (float)m * 0.5f));
+                            if (voice[k].delay >= c0 + m)
+                                continue;        /* (it starts later in the block) */
+                            voice[k].delay = voice[k].delay > c0 ? voice[k].delay - c0 : 0u;
+                            voice_render(&voice[k], (mine ? rb : tb) + c0, m, &ev,
+                                         tape_rate[t] * fm_exp2f(lv * lfo_d * lfo_d * (2.0f / 12.0f)));
+                        }
+                    } else {
+                        voice_render(&voice[k], mine ? rb : tb, n, &ev, tape_rate[t]);
+                    }
                     any = 1;
                     on++;
                 }
@@ -688,6 +794,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             bus[t].a = a_t;                  /* silent: nothing to filter, the knobs' values taken at once */
             bus[t].b = b_t;
             bus[t].gain = g_t;
+            bus[t].pan = pan_t;
             bus[t].lp1 = bus[t].lp2 = bus[t].hp1 = bus[t].hp2 = 0.0f;
             continue;
         }
@@ -728,10 +835,21 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         for (q = 0; q < 2u; q++)                 /* the shared effects: this track's part into their buses */
             if (FX_BUS[ft[q]] >= 0)
                 dry *= fx_send(ft[q], fs[q], fa[q], tb, n);
+        if (pan_t != 0.0f || bus[t].pan != 0.0f) {   /* the LFO's PAN: the side it leaves is turned down, to nothing at 100 */
+            float pn = bus[t].pan;
+            for (i = 0; i < n; i++) {
+                float x = tb[i] * dry;
+                pn += (pan_t - pn) * 0.004f;
+                mixl[i] += pn > 0.0f ? x * (1.0f - pn) : x;
+                mixr[i] += pn < 0.0f ? x * (1.0f + pn) : x;
+            }
+            bus[t].pan = pan_t == 0.0f && pn < 0.0005f && pn > -0.0005f ? 0.0f : pn;
+        } else {
         for (i = 0; i < n; i++) {
             float x = tb[i] * dry;
             mixl[i] += x;
             mixr[i] += x;
+        }
         }
         bus[t].a = a;
         bus[t].b = b;
@@ -820,6 +938,11 @@ static void defaults(void)
         trk[t].env_r = ENV_AUTO;
         trk[t].env_s = 100;
         trk[t].env_v = ENV_V_START;
+        trk[t].lfo_a = 0;
+        trk[t].lfo_r = LFO_R_START;
+        trk[t].lfo_t = LFO_PITCH;
+        trk[t].lfo_s = LFO_SINE;
+        lfo_ph[t] = 0.0f;
         trk[t].fx[0] = trk[t].fx[1] = FX_OFF;
         trk[t].fxk[0] = trk[t].fxk[1] = 0;
         for (i = 0; i < NSTEP; i++) {
@@ -858,7 +981,7 @@ void app_init(void)
 }
 
 /* --------------------------------------------------------------------- UI --- */
-enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV };
+enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV, PAGE_LFO };
 static struct {
     char msg[2][28];                     /* a short message over the header */
     uint32_t msg_until;
@@ -1131,6 +1254,20 @@ static void knob_turn(uint32_t k, int32_t e)
     track_t *t = &trk[ui.sel];
     char a[28], n[12];
     a[0] = 0;
+    if (ui.page == PAGE_LFO) {               /* the LFO's page: AMOUNT, RATE, TARGET, SHAPE */
+        ui.hot = (int8_t)k;
+        ui.hot_t = plat_ms();
+        if (k == 0u)
+            t->lfo_a = (uint8_t)clamp(t->lfo_a + e, 0, 100);
+        else if (k == 1u)
+            t->lfo_r = (uint8_t)clamp(t->lfo_r + e, 0, (int32_t)NLFO_R - 1);
+        else if (k == 2u)
+            t->lfo_t = (uint8_t)clamp(t->lfo_t + e, 0, (int32_t)NLFO_T - 1);
+        else
+            t->lfo_s = (uint8_t)clamp(t->lfo_s + e, 0, (int32_t)NLFO_S - 1);
+        ui.redraw = 1;
+        return;
+    }
     if (ui.page == PAGE_ENV) {               /* the envelope's page: ATTACK, RELEASE, SUSTAIN, VELOCITY */
         ui.hot = (int8_t)k;
         ui.hot_t = plat_ms();
@@ -1315,15 +1452,15 @@ static void input(void)
                 app_say(seq_play_req ? "PLAY" : "STOP", "");
         } else if (k == B_SEQ && on_t8l()) {     /* the looper's track has no steps */
             say_t8l();
-        } else if (k == B_SEQ || k == B_FX || k == B_ENV) {   /* SEQ: the steps and back; FX, ENV: their pages and back */
-            uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : PAGE_ENV;
+        } else if (k == B_SEQ || k == B_FX || k == B_ENV || k == B_LFO) {   /* SEQ: the steps and back; FX, ENV, LFO: their pages and back */
+            uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : k == B_ENV ? PAGE_ENV : PAGE_LFO;
             ui.page = (uint8_t)(ui.page == to ? PAGE_PLAY : to);
             ui.held_step = -1;
             for (e = 0; e < (int32_t)NKEYS; e++)        /* keys held across the change let go */
                 if (ui.keys >> e & 1u)
                     ev_put(QE_OFF, ui.trk_of[e], ui.note_of[e], 0);
             app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : ui.page == PAGE_ENV ? "ENV PAGE" :
-                    "TRACKS PAGE", "");
+                    ui.page == PAGE_LFO ? "LFO PAGE" : "TRACKS PAGE", "");
         } else {
             app_say(BTN_NAME[k], "NOT IN THIS VERSION");   /* (never a silent press) */
         }
@@ -1362,7 +1499,7 @@ static void input(void)
                * can be taken off */
               (ui.loop_mode && (lp.state == LP_REC || (lp.state == LP_ARMED && (plat_ms() >> 7 & 1u))) ? 1u << B_OCTUP : 0u) |
               (ui.loop_mode && lp.undo ? 1u << B_OCTDN : 0u) |
-              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
+              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
         for (k = 0; k < 16u; k++)
             if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
@@ -1429,7 +1566,7 @@ static void draw_header(void)
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
-        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : "TRACKS",
+        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : ui.page == PAGE_LFO ? "LFO" : "TRACKS",
                 C_GRAY);
         t[0] = 0;
         text_cat(t, "OCT ");
@@ -1544,6 +1681,25 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     char v[12];
     cv_begin(240, 52, C_BLACK);
     cv_rect(0, 0, 240, 1, C_LINE);
+    if (ui.page == PAGE_LFO) {               /* the LFO's page: its four knobs and their values */
+        static const char *const LN[4] = {"AMOUNT", "RATE", "TARGET", "SHAPE"};
+        for (k = 0; k < 4u; k++) {
+            int32_t x = 4 + (int32_t)k * 59;
+            int hot = ui.hot == (int8_t)k && now - ui.hot_t < 900u;
+            v[0] = 0;
+            if (k == 0u && !t->lfo_a)
+                text_cat(v, "OFF");
+            else if (k == 0u)
+                int_text(t->lfo_a, v);
+            else
+                text_cat(v, k == 1u ? LFO_R_NAME[t->lfo_r] : k == 2u ? LFO_T_NAME[t->lfo_t] : LFO_S_NAME[t->lfo_s]);
+            cv_text(x, 3, &FONT_T, LN[k], hot ? C_WHITE : C_GRAY);
+            cv_text(x, 16, k == 0u ? &FONT_B : &FONT_XS, v, hot ? C_WHITE : C_HI);
+        }
+        cv_text(4, 40, &FONT_T, "LFO: BACK TO THE TRACKS", C_DIM);
+        cv_blit(0, 188);
+        return;
+    }
     if (ui.page == PAGE_ENV) {               /* the envelope's page: its four knobs and their values */
         static const char *const EN[4] = {"ATTACK", "RELEASE", "SUSTAIN", "VELOCITY"};
         for (k = 0; k < 4u; k++) {
@@ -1701,6 +1857,53 @@ static void draw_env(void)
     }
 }
 
+/* the LFO's page: the selected track's AMOUNT, RATE, TARGET and SHAPE, each its name, its value in words and a line
+ * that shows where the knob stands */
+static void draw_lfo(void)
+{
+    static const char *const NAME[4] = {"AMOUNT", "RATE", "TARGET", "SHAPE"};
+    const track_t *tr = &trk[ui.sel];
+    uint32_t q;
+    char t[28], n[8];
+    for (q = 0; q < 4u; q++) {
+        int32_t val = q == 0u ? tr->lfo_a : q == 1u ? tr->lfo_r : q == 2u ? tr->lfo_t : tr->lfo_s;
+        int32_t hi = q == 0u ? 100 : q == 1u ? (int32_t)NLFO_R - 1 : q == 2u ? (int32_t)NLFO_T - 1 : (int32_t)NLFO_S - 1;
+        int32_t y = q < 2u ? 22 + (int32_t)q * 29 : 2 + (int32_t)(q - 2u) * 29, w = val * 226 / hi;
+        uint32_t off = q != 0u && !tr->lfo_a;    /* (AMOUNT at 0: the LFO is off, the rest waits) */
+        int hot = ui.hot == (int8_t)q && plat_ms() - ui.hot_t < 900u;
+        if (!(q & 1u)) {
+            cv_begin(240, 80, C_BLACK);
+            if (!q) {                            /* whose LFO this is */
+                trk_text(ui.sel, n);
+                cv_text(6, 2, &FONT_B, n, C_ORANGE);
+                list_name(tr->sound, t);
+                cv_text(40, 2, &FONT_S, t, C_WHITE);
+            }
+        }
+        cv_text(6, y, &FONT_B, NAME[q], hot ? C_ORANGE : off ? C_GRAY : C_WHITE);
+        t[0] = 0;
+        if (q == 0u && !val) {
+            text_cat(t, "OFF");
+        } else if (q == 0u) {
+            int_text(val, t);
+        } else if (q == 1u) {
+            text_cat(t, LFO_R_NAME[val]);
+        } else if (q == 2u) {
+            text_cat(t, LFO_T_NAME[val]);
+            text_cat(t, ": ");
+            text_cat(t, LFO_T_WORD[val]);
+        } else {
+            text_cat(t, LFO_S_NAME[val]);
+        }
+        cv_text(234 - text_w(&FONT_XS, t), y + 1, &FONT_XS, t, off ? C_GRAY : C_HI);
+        cv_rect(6, y + 20, 228, 1, C_DIM);       /* the knob's line */
+        cv_rect(6, y + 19, w, 3, off ? C_GRAY : C_ORANGE);
+        cv_rect(6 + w - 1, y + 16, 3, 9, off ? C_GRAY : C_WHITE);
+        if (q & 1u)
+            cv_blit(0, 28 + (q >> 1) * 80u);
+    }
+}
+
 #define TITLE_MS 2000u                   /* the title after a start: the name and the version, large */
 static void draw_title(void)                 /* in the tracks' place; the keys, the knobs and the header work meanwhile */
 {
@@ -1722,6 +1925,8 @@ static void draw(void)
         draw_fx();
     else if (ui.page == PAGE_ENV)
         draw_env();
+    else if (ui.page == PAGE_LFO)
+        draw_lfo();
     else if (ui.page == PAGE_STEP)
         draw_steps();
     else
@@ -2021,6 +2226,14 @@ int app_expect(const char *what, int *got)
         *got = trk[ui.sel].env_s;
     else if (!strcmp(what, "env_v"))
         *got = trk[ui.sel].env_v;
+    else if (!strcmp(what, "lfo_a"))         /* the selected track's LFO: AMOUNT, RATE, TARGET, SHAPE */
+        *got = trk[ui.sel].lfo_a;
+    else if (!strcmp(what, "lfo_r"))
+        *got = trk[ui.sel].lfo_r;
+    else if (!strcmp(what, "lfo_t"))
+        *got = trk[ui.sel].lfo_t;
+    else if (!strcmp(what, "lfo_s"))
+        *got = trk[ui.sel].lfo_s;
     else if (!strcmp(what, "fxa") || !strcmp(what, "fxb"))       /* the selected track's effect in slot A, B */
         *got = trk[ui.sel].fx[what[2] - 'a'];
     else if (!strcmp(what, "fxak") || !strcmp(what, "fxbk"))     /* and its knob */
@@ -2029,6 +2242,37 @@ int app_expect(const char *what, int *got)
         uint32_t b;
         for (*got = 0, b = 0; b < NBUS; b++)
             *got += fxb[b].awake;
+    }
+    else if (!strcmp(what, "bus_gain"))      /* the selected track's level as it is now (LEVEL and the LFO), in 1/1000 */
+        *got = (int)(bus[ui.sel].gain * 1000.0f + 0.5f);
+    else if (!strcmp(what, "bus_pan"))       /* its PAN as it is now, -1000 left .. 1000 right */
+        *got = (int)(bus[ui.sel].pan * 1000.0f + (bus[ui.sel].pan < 0.0f ? -0.5f : 0.5f));
+    else if (!strcmp(what, "bus_lp"))        /* its low-pass as it is now: 1000 open, less the further it is closed */
+        *got = (int)(bus[ui.sel].a * 1000.0f + 0.5f);
+    else if (!strcmp(what, "bench_lfo")) {   /* host only: as bench_mid, with the track's LFO on PITCH (the most work) */
+        static int32_t out[2 * APP_BLOCK];
+        uint32_t i, k, save = trk[0].sound, sa = trk[0].lfo_a, st = trk[0].lfo_t;
+        clock_t t0;
+        for (k = 1; k <= NSOUNDS && (SOUNDS[k - 1].flags & (SF_PCM | SF_DRUM)) != 0; k++)
+            ;
+        trk[0].sound = (uint8_t)k;
+        trk[0].lfo_a = 100;
+        trk[0].lfo_t = LFO_PITCH;
+        t0 = clock();
+        for (i = 0; i < 4000u; i++) {
+            for (k = 0; k < NVOICE; k++)
+                if (voice[k].state == V_OFF)
+                    voice_start(0, 60, 127, 0, 0, 0);
+            render_part(out, APP_BLOCK, 8300000.0f);
+        }
+        *got = (int)((double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 4000.0 * 10.0);
+        printf("  bench_lfo: %.1f us a block of %u frames, %u voices with the LFO on PITCH (this computer, not an FM-1)\n",
+               *got / 10.0, (unsigned)APP_BLOCK, (unsigned)NVOICE);
+        for (i = 0; i < NVOICE; i++)
+            voice[i].state = V_OFF;
+        trk[0].sound = (uint8_t)save;
+        trk[0].lfo_a = (uint8_t)sa;
+        trk[0].lfo_t = (uint8_t)st;
     }
     else if (!strcmp(what, "bench_fx")) {    /* host only: microseconds a block, every voice busy and every bus fed */
         static int32_t out[2 * APP_BLOCK];

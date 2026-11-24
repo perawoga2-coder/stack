@@ -1,0 +1,227 @@
+# STACK in the host simulator: the LFO page.
+#   app/build/host/stack_host app/tests/lfo.txt app/build/host
+master 4096
+wait 2200
+# the organ on track 5
+turn ALGO 4
+wait 40
+turn PRESET 4
+wait 60
+expect track 5
+expect sound 37
+# LFO: its page and back, as FX and ENV
+expect page 0
+tap LFO
+wait 40
+expect page 4
+tap LFO
+wait 40
+expect page 0
+tap LFO
+wait 40
+expect page 4
+# as it starts: off (AMOUNT 0), 1/8, PITCH, SINE
+expect lfo_a 0
+expect lfo_r 6
+expect lfo_t 0
+expect lfo_s 0
+shot lfo_off.png
+# AMOUNT 0: nothing moves, whatever the other three say (the level stays LEVEL's own: 0.8 squared)
+turn K3 2
+turn K4 2
+wait 40
+expect lfo_t 2
+expect lfo_s 2
+key 7 down 100
+wait 400
+expect bus_gain 640
+wait 300
+expect bus_gain 640
+expect bus_pan 0
+key 7 up
+wait 300
+turn K3 -2
+turn K4 -2
+wait 40
+# the knobs stop at their ends
+turn K2 20
+wait 40
+expect lfo_r 10
+turn K2 -20
+wait 40
+expect lfo_r 0
+turn K3 9
+wait 40
+expect lfo_t 3
+turn K3 -9
+wait 40
+expect lfo_t 0
+turn K4 9
+wait 40
+expect lfo_s 4
+turn K4 -9
+wait 40
+expect lfo_s 0
+turn K1 150
+wait 40
+expect lfo_a 100
+turn K1 -150
+wait 40
+expect lfo_a 0
+# --- PITCH: vibrato, a sine at 1/8 (4 a second at 120), AMOUNT 60; it starts again with each note
+turn K2 6
+turn K1 60
+wait 40
+expect lfo_r 6
+expect lfo_a 60
+shot lfo_pitch.png
+wav lfo_pitch.wav
+key 7 down 100
+wait 1500
+key 7 up
+wait 300
+key 7 down 100
+wait 1500
+key 7 up
+wait 400
+wavstop
+expect lim_clips 0
+# --- FILTER: wah, a triangle at 1/4, AMOUNT 80, FILTER at OFF: a low-pass that closes and opens again
+turn K3 1
+turn K4 1
+turn K2 -2
+turn K1 20
+wait 40
+expect lfo_t 1
+expect lfo_s 1
+expect lfo_r 4
+expect lfo_a 80
+shot lfo_filter.png
+wav lfo_filter.wav
+key 7 down 100
+wait 2500
+key 7 up
+wait 400
+wavstop
+# with the pattern playing it keeps to the bar: every quarter note the same, open a sixteenth in, closed three in
+tap PLAY
+wait 40
+key 7 down 100
+wait 1003
+expect bus_lp >700
+wait 250
+expect bus_lp <200
+wait 250
+expect bus_lp >700
+key 7 up
+wait 200
+# --- LEVEL: tremolo, a square at 1/8, AMOUNT 100: on for a sixteenth, silent for a sixteenth, on the beat
+turn K3 1
+turn K4 1
+turn K2 2
+turn K1 20
+wait 40
+expect lfo_t 2
+expect lfo_s 2
+expect lfo_r 6
+expect lfo_a 100
+tap PLAY
+wait 200
+shot lfo_level.png
+wav lfo_level.wav
+key 7 down 100
+tap PLAY
+wait 2500
+tap PLAY
+key 7 up
+wait 400
+wavstop
+tap PLAY
+key 7 down 100
+wait 20
+expect bus_gain >600
+wait 125
+expect bus_gain <30
+wait 125
+expect bus_gain >600
+wait 125
+expect bus_gain <30
+key 7 up
+tap PLAY
+wait 300
+# --- PAN: left and right, a sine at 1/4, AMOUNT 100
+turn K3 1
+turn K4 -2
+turn K2 -2
+wait 40
+expect lfo_t 3
+expect lfo_s 0
+expect lfo_r 4
+shot lfo_pan.png
+wav lfo_pan.wav
+key 7 down 100
+tap PLAY
+wait 45
+expect bus_pan >850
+wait 250
+expect bus_pan <-850
+wait 250
+expect bus_pan >850
+wait 2000
+tap PLAY
+key 7 up
+wait 400
+wavstop
+# AMOUNT back to 0: the track is in the middle again
+turn K1 -100
+wait 300
+expect lfo_a 0
+expect bus_pan 0
+# each track has its own: track 1's is off
+tap LFO
+wait 40
+expect page 0
+turn ALGO -4
+wait 40
+expect track 1
+tap LFO
+wait 40
+expect lfo_a 0
+expect lfo_t 0
+tap LFO
+wait 40
+# the saw shapes, for the demo: FILTER with SAW DOWN at 1/8 on the saw lead (track 6)
+turn ALGO 5
+wait 40
+expect track 6
+tap LFO
+wait 40
+turn K3 1
+turn K4 4
+turn K1 70
+wait 40
+expect lfo_s 4
+wav lfo_filter_saw_down.wav
+key 7 down 100
+wait 2000
+key 7 up
+wait 400
+wavstop
+turn K1 -100
+wait 40
+tap LFO
+wait 40
+expect page 0
+# the others are as they were: the FX and ENV pages still open
+tap FX
+wait 40
+expect page 2
+tap ENV
+wait 40
+expect page 3
+tap ENV
+wait 40
+expect page 0
+expect lim_clips 0
+expect bench_mid >0
+expect bench_lfo >0
