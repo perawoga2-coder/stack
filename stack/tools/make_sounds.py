@@ -26,48 +26,44 @@ TARGET_DB = -15.5       # K-weighted mean square of the loudest 100 ms, dB re fu
 PEAK = 0.89             # no sound's own peak passes -1 dBFS
 CATS = ["DRUMS", "BASS", "KEYS", "PAD", "LEAD", "FX"]
 
-IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88,
-            97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
-            724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660,
-            4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818,
-            18500, 20350, 22385, 24623, 27086, 29794, 32767]
+IMA_STEP = [  # the standard's 89 step sizes, ten a row
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
+    19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+    50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
+    130, 143, 157, 173, 190, 209, 230, 253, 279, 307,
+    337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
+    876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
+    2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358,
+    5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+    15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767]
 IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8]
 
 
 def ima_encode(x):
-    """x: int16 samples -> (bytes, the decoded samples, the decoder's state before each sample [(pred, index)])"""
-    pred, idx = 0, 0
-    out = bytearray((len(x) + 1) // 2)
-    dec = np.zeros(len(x), dtype=np.int16)
-    states = []
-    for n, s in enumerate(x.tolist()):
-        states.append((pred, idx))
-        step = IMA_STEP[idx]
-        diff = s - pred
-        code = 0
-        if diff < 0:
-            code = 8
-            diff = -diff
-        vd = step >> 3
-        if diff >= step:
-            code |= 4
-            diff -= step
-            vd += step
-        if diff >= step >> 1:
-            code |= 2
-            diff -= step >> 1
-            vd += step >> 1
-        if diff >= step >> 2:
-            code |= 1
-            vd += step >> 2
-        pred = max(-32768, min(32767, pred - vd if code & 8 else pred + vd))
-        idx = max(0, min(88, idx + IMA_INDEX[code & 7]))
-        dec[n] = pred
-        if n & 1:
-            out[n >> 1] |= code << 4
-        else:
-            out[n >> 1] = code
-    return bytes(out), dec, states
+    """x: int16 samples -> (bytes, the decoded samples, the decoder's state before each sample [(pred, index)]).
+    Written from the IMA standard: the sign, then the three magnitude bits against the step, its half and its quarter;
+    the encoder keeps the decoder's own value, so the two never drift apart."""
+    value, index = 0, 0
+    packed = bytearray((len(x) + 1) // 2)
+    heard = np.zeros(len(x), dtype=np.int16)
+    before = []
+    for pos, want in enumerate(x.tolist()):
+        before.append((value, index))
+        size = IMA_STEP[index]
+        gap = want - value
+        nibble = 8 if gap < 0 else 0
+        gap = abs(gap)
+        moved = size // 8
+        for bit, part in ((4, size), (2, size // 2), (1, size // 4)):
+            if gap >= part:
+                nibble += bit
+                gap -= part
+                moved += part
+        value = int(np.clip(value - moved if nibble >= 8 else value + moved, -32768, 32767))
+        index = int(np.clip(index + IMA_INDEX[nibble % 8], 0, 88))
+        heard[pos] = value
+        packed[pos // 2] |= nibble << (4 * (pos % 2))
+    return bytes(packed), heard, before
 
 
 def decode(path, rate):

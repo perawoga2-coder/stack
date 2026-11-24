@@ -10,6 +10,8 @@
 #define APP_SPLASH_RGB RGB(255, 122, 47)
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
 #define APP_TOUCH                        /* velocity from the keys (lib/touch.h) */
+#define APP_SYSEX                        /* the Burger Studio app's sample messages (my_samples.c) */
+int app_sysex(const uint8_t *p, uint32_t n);
 
 /* the store: STACK saves nothing yet of its own (no plat_store_save call in the app); the panel calibration is the
  * platform's. The offsets are fm1-base's template's */

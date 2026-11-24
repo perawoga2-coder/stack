@@ -5,7 +5,7 @@
   "author": "Maker Hip",
   "license": "MPL-2.0",
   "tagline": "eight tracks of sounds, easy to follow",
-  "description": "A test build. Eight tracks, each with one sound from a single list of 78 built-in sounds (drums, bass, keys, pads, leads, effects), all at the same loudness; the keys play the selected track; four knobs shape it (pitch, a DJ filter, decay, level); a basic 16-step page; a limiter on the output. Nothing is saved yet.",
+  "description": "A test build. Eight tracks, each with one sound from a single list of 78 built-in sounds (drums, bass, keys, pads, leads, effects), all at the same loudness; samples sent from the Burger Studio app come into three slots at the end of the list; the keys play the selected track; four knobs shape it (pitch, a DJ filter, decay, level); a basic 16-step page; a limiter on the output. The tracks and steps are not saved yet.",
   "tags": ["groovebox", "sampler"],
   "install": "https://github.com/perawoga2-coder/stack",
   "site": "https://github.com/perawoga2-coder/stack",

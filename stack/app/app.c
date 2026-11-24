@@ -10,7 +10,9 @@
  *   KNOB 1..4  the selected track's PITCH, FILTER (left low-pass, the middle off, right high-pass), DECAY, LEVEL
  *   OCT- OCT+  the keys' octave, on release; both together are kept for the looper (not in this version)
  *   PLAY       play / stop the steps;  SEQ  the step page and back (16 steps a track, the white keys)
- * No randomness anywhere: the same press gives the same result. Nothing is saved, and nothing is written to the flash.
+ * Samples sent by the Burger Studio app come into MY 1 .. MY 3, at the end of the list (my_samples.c).
+ * No randomness anywhere: the same press gives the same result. The tracks and steps are not saved; the flash is
+ * written only while the app sends a sample, and only inside the three slots.
  * Part of the unity build (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. */
 #include "fastmath.h"
 
@@ -38,19 +40,30 @@ typedef struct {
 
 /* IMA ADPCM, the standard's two tables (IMA Digital Audio Focus and Technical Working Groups, "Recommended Practices
  * for Enhancing Digital Audio Compatibility in Multimedia Systems", 1992) */
-static const int16_t IMA_STEP[89] = {
-    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88,
-    97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
-    724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660,
-    4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818,
-    18500, 20350, 22385, 24623, 27086, 29794, 32767};
+static const int16_t IMA_STEP[89] = {       /* the standard's 89 step sizes, ten a row */
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
+    19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+    50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
+    130, 143, 157, 173, 190, 209, 230, 253, 279, 307,
+    337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
+    876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
+    2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358,
+    5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+    15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767};
 static const int8_t IMA_INDEX[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
 
 /* the one list PRESETS walks: EMPTY, the built-in sounds, then the three slots for samples from the app (empty in
  * this version: the app's samples come in a later one) */
 #define NMY 3u
 #define NLIST (1u + NSOUNDS + NMY)
-static const sound_t *list_sound(uint32_t i) { return i >= 1u && i <= NSOUNDS ? &SOUNDS[i - 1u] : 0; }
+#include "my_samples.c"                  /* MY 1 .. MY 3: the samples the Burger Studio app sends */
+/* the sound at a place in the list (a sample from the app: its first zone), 0 = none there */
+static const sound_t *list_sound(uint32_t i)
+{
+    if (i >= 1u && i <= NSOUNDS)
+        return &SOUNDS[i - 1u];
+    return i > NSOUNDS && i < NLIST && my[i - NSOUNDS - 1u].valid ? &my[i - NSOUNDS - 1u].z[0] : 0;
+}
 
 static void text_cat(char *d, const char *s)
 {
@@ -76,20 +89,31 @@ static void int_text(int32_t v, char *b)     /* signed, no padding */
     *b = 0;
 }
 
-static void list_name(uint32_t i, char *b)   /* "EMPTY", "ROCK KICK", "MY 1 (EMPTY)" */
+static void list_name(uint32_t i, char *b)   /* "EMPTY", "KICK ROCK", "MY 1 SPOONS", "MY 2 (EMPTY)", "MY 2 (IN MY 1)" */
 {
     const sound_t *s = list_sound(i);
+    char n[4];
     b[0] = 0;
-    if (s)
+    if (i >= 1u && i <= NSOUNDS) {
         text_cat(b, s->name);
-    else if (!i)
+    } else if (!i) {
         text_cat(b, "EMPTY");
-    else {
-        char n[4];
+    } else {
+        const my_slot_t *m = &my[i - NSOUNDS - 1u];
         int_text((int32_t)(i - NSOUNDS), n);
         text_cat(b, "MY ");
         text_cat(b, n);
-        text_cat(b, " (EMPTY)");
+        text_cat(b, " ");
+        if (m->valid) {
+            text_cat(b, m->name[0] ? m->name : "SAMPLE");
+        } else if (m->cov) {
+            int_text(m->cov, n);
+            text_cat(b, "(IN MY ");
+            text_cat(b, n);
+            text_cat(b, ")");
+        } else {
+            text_cat(b, "(EMPTY)");
+        }
     }
 }
 
@@ -99,7 +123,7 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and th
     uint32_t k, at = 0, of = 0;
     char n[8];
     b[0] = 0;
-    if (!s) {
+    if (i < 1u || i > NSOUNDS) {
         text_cat(b, i ? "MY SAMPLES" : "");
         return;
     }
@@ -152,6 +176,8 @@ typedef struct {
     int32_t pred;                        /* ADPCM: the decoder */
     int32_t idx;
     uint8_t done;                        /* a one-shot: its last sample has been fetched */
+    uint8_t my;                          /* 1 + the app's slot it plays (0: a built-in sound) */
+    float gain;                          /* a sample from the app: what brings it to the built-in sounds' loudness */
     uint32_t delay;                      /* frames into this block before it starts */
     uint32_t life;                       /* a preview: frames until it lets go (0: none) */
     uint32_t age;
@@ -237,10 +263,10 @@ static float voice_fetch(voice_t *v)
 
 static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay, uint32_t seq, uint32_t life)
 {
-    const sound_t *s = list_sound(trk[t].sound);
-    uint32_t i, k = 0, oldest = 0xFFFFFFFFu;
+    uint32_t li = trk[t].sound, i, k = 0, oldest = 0xFFFFFFFFu;
+    float g = 1.0f, st;
+    const sound_t *s = li > NSOUNDS ? my_sound(li - NSOUNDS - 1u, note, &g) : list_sound(li);
     voice_t *v;
-    float st;
     if (!s)
         return;                          /* an empty track is silent */
     for (i = 0; i < NVOICE; i++) {       /* a free voice, or else the oldest */
@@ -271,6 +297,8 @@ static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay,
     v->env = 1.0f;
     v->att = 0.0f;
     v->vel = 0.25f + 0.75f * (float)vel * (1.0f / 127.0f);
+    v->gain = g;
+    v->my = (uint8_t)(li > NSOUNDS ? li - NSOUNDS : 0u);
     v->delay = delay;
     v->life = life;
     v->age = ++voice_age;
@@ -289,6 +317,22 @@ static void voice_release(uint32_t t, uint32_t note, uint32_t seq)
             !(v->s->flags & SF_DRUM))
             v->state = V_REL;
     }
+}
+
+/* the voices playing these slots of the app's end before the main loop goes on (my_samples.c: before an erase) */
+static void my_voices_end(uint32_t mask)
+{
+#ifdef PLAT_HOST
+    uint32_t k;                              /* (the simulator renders between the script's lines: ended here) */
+    for (k = 0; k < NVOICE; k++)
+        if (voice[k].my && (mask >> (voice[k].my - 1u) & 1u))
+            voice[k].state = V_OFF;
+#else
+    uint32_t t0 = plat_ms();
+    my_kill = (uint8_t)(my_kill | mask);
+    while (my_kill && plat_ms() - t0 < 60u)  /* the audio interrupt takes it within a block (5.8 ms) */
+        ;
+#endif
 }
 
 static void midi_in(void)                    /* audio interrupt: MIDI in plays the selected track */
@@ -347,7 +391,7 @@ static float mix[APP_BLOCK];
 static void voice_render(voice_t *v, uint32_t n, float dcoef, float rcoef)
 {
     uint32_t i = v->delay;
-    float frac = v->frac, inc = v->inc, env = v->env, att = v->att, amp = v->vel * (VOICE_AMP / 32768.0f);
+    float frac = v->frac, inc = v->inc, env = v->env, att = v->att, amp = v->vel * v->gain * (VOICE_AMP / 32768.0f);
     float s0 = v->s0, s1 = v->s1;
     v->delay = 0;
     for (; i < n; i++) {
@@ -379,6 +423,12 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
 {
     uint32_t t, i, k, on = 0;
     uint32_t r = evq_r;
+    if (my_kill) {                           /* a slot of the app's is about to be erased: its voices end here */
+        for (k = 0; k < NVOICE; k++)
+            if (voice[k].my && (my_kill >> (voice[k].my - 1u) & 1u))
+                voice[k].state = V_OFF;
+        my_kill = 0;
+    }
     while (r != evq_w) {                     /* the keys' notes since the last block */
         uint32_t e = evq[r], kind = e >> 24, tr = e & 0xFFu, note = (e >> 8) & 0x7Fu, vel = (e >> 16) & 0x7Fu;
         if (kind == QE_ON)
@@ -518,7 +568,11 @@ static void defaults(void)
     }
 }
 
-void app_init(void) { defaults(); }
+void app_init(void)
+{
+    my_load_all(1);                          /* the samples the app sent before (they stay in the flash) */
+    defaults();
+}
 
 /* --------------------------------------------------------------------- UI --- */
 enum { PAGE_PLAY, PAGE_STEP };
@@ -985,6 +1039,72 @@ static void draw(void)
     draw_knobs();
 }
 
+/* a sample from the app has come in whole: it goes onto track 7 or 8 if one is empty, and the screen says where it
+ * is. A track that plays something is never changed; a track that had this slot already plays the new sample */
+static void my_arrived(uint32_t k)
+{
+    uint32_t li = NSOUNDS + 1u + k, t;
+    char a[28], b[12];
+    list_name(li, a);
+    b[0] = 0;
+    for (t = 0; t < NTRK && trk[t].sound != li; t++)
+        ;
+    if (t < NTRK) {
+        text_cat(b, "ON T");
+    } else {
+        for (t = 6; t < NTRK && trk[t].sound; t++)
+            ;
+        if (t < NTRK) {
+            trk[t].sound = (uint8_t)li;
+            text_cat(b, "> T");
+        }
+    }
+    if (t < NTRK) {
+        b[4] = 0;
+        b[b[0] == '>' ? 3 : 4] = (char)('1' + t);
+        b[b[0] == '>' ? 4 : 5] = 0;
+    } else {
+        text_cat(b, "IN LIST");
+    }
+    app_say(a, b);
+}
+
+static void my_progress(void)                /* "RECEIVING MY 1  24 KB" */
+{
+    char a[20], b[12], n[8];
+    a[0] = b[0] = 0;
+    text_cat(a, "RECEIVING MY ");
+    int_text((int32_t)rx.slot + 1, n);
+    text_cat(a, n);
+    int_text((int32_t)((rx.next - MY_DATA) / 1024u), n);
+    text_cat(b, n);
+    text_cat(b, " KB");
+    app_say(a, b);
+}
+
+static void my_frame(void)                   /* every frame: what the app's messages left for the screen to say */
+{
+    char a[20], n[4];
+    if (rx.on && plat_ms() - rx.t > 5000u) { /* the app stopped half way: the slot stays empty */
+        rx.on = 0;
+        my_failed = (uint8_t)(rx.slot + 1u);
+    }
+    if (my_event) {
+        uint32_t k = my_event - 1u;
+        my_event = 0;
+        my_arrived(k);
+    }
+    if (my_failed) {
+        a[0] = 0;
+        text_cat(a, "MY ");
+        int_text(my_failed, n);
+        text_cat(a, n);
+        my_failed = 0;
+        app_say(a, "NOT RECEIVED");
+    }
+    my_measure(3000);
+}
+
 void app_ui_init(void)
 {
     touch_on(1);                             /* velocity: the keys' readings on */
@@ -1002,6 +1122,7 @@ void app_frame(void)
     static uint32_t last_step = 255, last_play = 2;
     uint32_t now = plat_ms();
     input();
+    my_frame();
     speak();
     if (ui.msg_until && now >= ui.msg_until) {
         ui.msg_until = 0;
@@ -1069,6 +1190,15 @@ int app_expect(const char *what, int *got)
         lim.peak = 0.0f;
     } else if (!strcmp(what, "lim_clips"))   /* samples the limiter let past full scale (never) */
         *got = (int)lim.clips;
+    else if (!strncmp(what, "my_gain", 7)) /* my_gainN: slot N's playback gain in 0.01 (0: no sample, or not measured) */
+        *got = my[(atoi(what + 7) - 1) % (int)NMY].valid && my[(atoi(what + 7) - 1) % (int)NMY].measured
+                   ? (int)(my[(atoi(what + 7) - 1) % (int)NMY].gain * 100.0f + 0.5f) : 0;
+    else if (!strncmp(what, "my", 2) && what[2] >= '1' && what[2] <= '3')   /* myN: slot N's zones (0 empty) */
+        *got = my[what[2] - '1'].valid ? my[what[2] - '1'].nz : 0;
+    else if (!strcmp(what, "receiving"))
+        *got = rx.on;
+    else if (!strncmp(what, "trk", 3) && what[3] >= '1' && what[3] <= '8')  /* trkN: track N's place in the list */
+        *got = trk[what[3] - '1'].sound;
     else if (!strcmp(what, "cat"))           /* the selected track's sound's category (0 DRUMS .. 5 FX), -1 none */
         *got = list_sound(trk[ui.sel].sound) ? list_sound(trk[ui.sel].sound)->cat : -1;
     else if (!strncmp(what, "bench", 5)) {   /* host only: microseconds a block with every voice busy: "bench" three
