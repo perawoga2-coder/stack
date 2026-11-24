@@ -16,10 +16,6 @@
  * Part of the unity build (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. */
 #include "fastmath.h"
 
-#ifndef APP_VERSION
-#define APP_VERSION "DEV"                /* (a release build's -DAPP_VERSION: stack/VERSION, through the workflow) */
-#endif
-
 /* ------------------------------------------------------------------ sounds --- */
 enum { CAT_DRUMS, CAT_BASS, CAT_KEYS, CAT_PAD, CAT_LEAD, CAT_FX, NCAT };
 static const char *const CAT_NAME[NCAT] = {"DRUMS", "BASS", "KEYS", "PAD", "LEAD", "FX"};
@@ -616,6 +612,7 @@ static struct {
     uint8_t trk_of[NKEYS];
     int8_t hot;                          /* the knob turned last (0..3), lit for a moment */
     uint32_t hot_t;
+    uint8_t title;                       /* the title is up (the first TITLE_MS after a start) */
     uint8_t cpu;                         /* plat_cpu_pct, as drawn */
     uint32_t cpu_t;
     uint8_t redraw;
@@ -935,24 +932,27 @@ static void draw_header(void)
     char t[28];
     uint32_t now = plat_ms();
     cv_begin(240, 28, C_BLACK);
+    /* two lines: the first is the name row or a message; the second, small, is the version, always there (the build's
+     * APP_VERSION: stack/VERSION, the one place it is written) */
     if (now < ui.msg_until) {
-        int32_t x = cv_text(6, 5, &FONT_B, ui.msg[0], C_WHITE);
-        cv_text(x + 6, 5, &FONT_B, ui.msg[1], C_HI);
+        int32_t x = cv_text(6, 0, &FONT_B, ui.msg[0], C_WHITE);
+        cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
     } else {
-        int32_t x = cv_text(6, 5, &FONT_B, APP_NAME, C_ORANGE);
-        cv_text(x + 8, 8, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : "TRACKS", C_GRAY);
+        int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
+        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : "TRACKS", C_GRAY);
         t[0] = 0;
         text_cat(t, "OCT ");
         t[4] = ui.octave < 0 ? '-' : '+';
         t[5] = (char)('0' + (ui.octave < 0 ? -ui.octave : ui.octave));
         t[6] = 0;
-        cv_text(150, 8, &FONT_XS, t, C_GRAY);
+        cv_text(150, 2, &FONT_XS, t, C_GRAY);
         t[0] = 0;                            /* the audio's share of the processor (a test version's readout) */
         text_cat(t, "CPU ");
         int_text((int32_t)ui.cpu, t + 4);
-        cv_text(104, 11, &FONT_T, t, ui.cpu >= 70u ? C_WHITE : C_DIM);
-        cv_text(200, 8, &FONT_XS, seq_play_req ? "PLAY" : "STOP", seq_play_req ? C_HI : C_DIM);
+        cv_text(104, 5, &FONT_T, t, ui.cpu >= 70u ? C_WHITE : C_DIM);
+        cv_text(200, 2, &FONT_XS, seq_play_req ? "PLAY" : "STOP", seq_play_req ? C_HI : C_DIM);
     }
+    cv_text(6, 15, &FONT_T, APP_VERSION, C_GRAY);
     cv_rect(0, 27, 240, 1, C_LINE);
     cv_blit(0, 0);
 }
@@ -1054,10 +1054,24 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     cv_blit(0, 188);
 }
 
+#define TITLE_MS 2000u                   /* the title after a start: the name and the version, large */
+static void draw_title(void)                 /* in the tracks' place; the keys, the knobs and the header work meanwhile */
+{
+    cv_begin(240, 80, C_BLACK);
+    cv_text((240 - text_w(&FONT_L, APP_NAME)) / 2, 40, &FONT_L, APP_NAME, C_ORANGE);
+    cv_blit(0, 28);
+    cv_begin(240, 80, C_BLACK);
+    cv_text((240 - text_w(&FONT_M, APP_VERSION)) / 2, 8, &FONT_M, APP_VERSION, C_WHITE);
+    cv_text((240 - text_w(&FONT_XS, "MAKER HIP")) / 2, 44, &FONT_XS, "MAKER HIP", C_GRAY);
+    cv_blit(0, 108);
+}
+
 static void draw(void)
 {
     draw_header();
-    if (ui.page == PAGE_STEP)
+    if (ui.title)
+        draw_title();
+    else if (ui.page == PAGE_STEP)
         draw_steps();
     else
         draw_tracks();
@@ -1149,6 +1163,7 @@ static void my_frame(void)                   /* every frame: what the app's mess
 void app_ui_init(void)
 {
     my_t0 = plat_ms();
+    ui.title = 1;
     touch_on(1);                             /* velocity: the keys' readings on */
     plat_usb_audio_full(1);                  /* USB audio at full level, whatever MASTER says */
     lcd_fill(0, 0, 240, 240, C_BLACK);
@@ -1176,6 +1191,10 @@ void app_frame(void)
     }
     if (ui.undo_ok && now - ui.undo_t >= 1500u && now - ui.undo_t < 1600u)
         ui.redraw = 1;
+    if (ui.title && now - my_t0 >= TITLE_MS) {
+        ui.title = 0;
+        ui.redraw = 1;
+    }
     if (now - ui.cpu_t >= 500u) {            /* the CPU readout, twice a second */
         uint32_t c = plat_cpu_pct();
         ui.cpu_t = now;

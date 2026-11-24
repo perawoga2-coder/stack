@@ -5,6 +5,7 @@ id_prefix = "FM-1_58"          # package identity. TEMPORARY for the test builds
 usb_manufacturer = "Maker Hip"
 usb_product = "STACK FM-1"
 o2 = []
+gen = ["../tools/gen_version.py {gen}/stack_version.h"]   # the version, from stack/VERSION (app.h)
 words = "words.tsv"
 ble = false                    # Bluetooth MIDI comes in a later version
 # the site and firmware.json

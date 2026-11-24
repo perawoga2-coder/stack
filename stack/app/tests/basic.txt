@@ -1,8 +1,9 @@
 # STACK in the host simulator: base/tools/build.py app --host, then
 #   app/build/host/stack_host app/tests/basic.txt app/build/host
 master 4096
+# the title: the name and the version, large, for the first 2 s; the keys play meanwhile (below)
 wait 600
-shot boot.png
+shot title.png
 expect track 1
 expect sound 1
 expect nlist 82
@@ -181,6 +182,8 @@ tap SEQ
 wait 60
 expect page 0
 shot play_page.png
+wait 1800
+shot play_idle.png
 # a button with no job says so
 tap FX
 wait 40

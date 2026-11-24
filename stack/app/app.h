@@ -7,6 +7,10 @@
 #include "plat.h"
 
 #define APP_NAME "STACK"
+#include "stack_version.h"               /* STACK_VERSION: stack/VERSION, by tools/gen_version.py at every build */
+#ifndef APP_VERSION                      /* (a release build passes the same, from the same file: --release) */
+#define APP_VERSION STACK_VERSION
+#endif
 #define APP_SPLASH_RGB RGB(255, 122, 47)
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
 #define APP_TOUCH                        /* velocity from the keys (lib/touch.h) */
