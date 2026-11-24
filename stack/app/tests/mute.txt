@@ -1,0 +1,119 @@
+# STACK in the host simulator: MUTE, the Burger Studio app's message 20 (docs/PROTOCOL.md).
+#   app/build/host/stack_host app/tests/mute.txt app/build/host
+master 4096
+wait 600
+# at a start the FM-1 sounds; asking changes nothing
+expect mute 0
+sysex_out
+sysex F0 7D 46 4C 14 F7
+expect_sysex F0 7D 46 4C 14 00 1E F7
+expect mute 0
+# a held note (the organ on track 5), heard on the FM-1's own output
+tap SEQ
+wait 40
+turn ALGO 4
+wait 40
+turn PRESET 4
+wait 60
+tap SEQ
+wait 40
+key 7 down 100
+wait 300
+peakreset
+expect lim_peak >0
+wait 300
+expect peak_db_min -30
+expect lim_peak >100
+shot mute_off.png
+# MUTE ON: the answer says muted and the 3 s; the FM-1's own output is silent, the screen says SOUND IN BURGER
+wav mute_speaker.wav
+usbwav mute_usb.wav
+wait 500
+sysex_out
+sysex F0 7D 46 4C 14 01 F7
+expect_sysex F0 7D 46 4C 14 01 1E F7
+expect mute 1
+wait 100
+shot mute_on.png
+peakreset
+expect lim_peak >0
+wait 500
+expect peak_db_max -100
+# the USB audio input still gets all of it: the render is as loud as before (the platform takes it before the mute)
+expect lim_peak >100
+# asked again every second, it stays silent well past 3 s
+sysex F0 7D 46 4C 14 01 F7
+wait 1000
+sysex F0 7D 46 4C 14 01 F7
+wait 1000
+sysex F0 7D 46 4C 14 01 F7
+wait 1000
+sysex F0 7D 46 4C 14 01 F7
+wait 1000
+expect mute 1
+peakreset
+wait 300
+expect peak_db_max -100
+# a wrong value changes nothing and answers the state
+sysex_out
+sysex F0 7D 46 4C 14 05 F7
+expect_sysex F0 7D 46 4C 14 01 1E F7
+expect mute 1
+# MUTE OFF: it sounds again at once
+sysex_out
+sysex F0 7D 46 4C 14 00 F7
+expect_sysex F0 7D 46 4C 14 00 1E F7
+expect mute 0
+wait 100
+peakreset
+wait 300
+expect peak_db_min -30
+shot mute_off_again.png
+# not asked again: still silent at 2.8 s, sounding again by 3.1 s
+sysex F0 7D 46 4C 14 01 F7
+wait 2800
+expect mute 1
+wait 300
+expect mute 0
+peakreset
+wait 300
+expect peak_db_min -30
+wavstop
+usbwavstop
+# the cable out: it sounds again at once, not after 3 s
+sysex F0 7D 46 4C 14 01 F7
+wait 100
+expect mute 1
+usb unplug
+wait 50
+expect mute 0
+peakreset
+wait 300
+expect peak_db_min -30
+# and stays so with the cable in again (the app must ask again)
+usb plug
+wait 500
+expect mute 0
+key 7 up
+wait 300
+# a restart while muted: it sounds
+sysex F0 7D 46 4C 14 01 F7
+wait 50
+expect mute 1
+reboot
+wait 600
+expect mute 0
+sysex F0 7D 46 4C 14 01 F7
+wait 50
+expect mute 1
+power
+wait 600
+expect mute 0
+# the looper and the rest are as they were: the mode still turns on
+press OCT-
+press OCT+
+wait 60
+release OCT+
+release OCT-
+wait 60
+expect loop_mode 1

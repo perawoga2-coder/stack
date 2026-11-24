@@ -17,6 +17,13 @@
 #define APP_SYSEX                        /* the Burger Studio app's sample messages (my_samples.c) */
 int app_sysex(const uint8_t *p, uint32_t n);
 
+/* MUTE (the Burger Studio app's message 20, docs/PROTOCOL.md): the FM-1's own output (speaker and 3.5 mm jack) silent
+ * while the app plays the FM-1's sound itself, from the USB audio input. The platform takes the USB audio input from
+ * the render first (at full level: plat_usb_audio_full), then puts this gain on what goes to the speaker and the jack
+ * (fm1-base device/uac_mix.h), sliding to it across a block: so 0 here is silence there, and the app hears it all */
+extern volatile uint8_t stack_mute;
+#define APP_GAIN(m) (stack_mute ? 0u : (m) * (m) >> 12)
+
 /* the store: STACK saves nothing yet of its own (no plat_store_save call in the app); the panel calibration is the
  * platform's. The offsets are fm1-base's template's */
 enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_NOBJ };

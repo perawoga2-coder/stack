@@ -711,6 +711,8 @@ void app_init(void)
     memset(&lp, 0, sizeof lp);               /* no loop at a start: it was never kept */
     lp.div = 2;
     lp.bars = 1;
+    stack_mute = 0;                          /* a start always sounds */
+    memset(&mute, 0, sizeof mute);
     memset(my, 0, sizeof my);                /* (a start is from nothing: the simulator's restart keeps the RAM) */
     ms.slot = -1;
     mc.slot = -1;
@@ -1305,6 +1307,12 @@ static void draw_header(void)
         cv_text(200, 2, &FONT_XS, seq_play_req ? "PLAY" : "STOP", seq_play_req ? C_HI : C_DIM);
     }
     cv_text(6, 15, &FONT_T, APP_VERSION, C_GRAY);
+    if (stack_mute && !(ui.loop_mode && now >= ui.msg_until && ((ui.dn_t && !ui.dn_fired) || lp.state == LP_REC))) {
+        /* the app plays the FM-1's sound: said on the second line, on every page (a looper's bar there goes first) */
+        int32_t w = text_w(&FONT_XS, "SOUND IN BURGER");
+        cv_rect(240 - w - 10, 15, w + 10, 12, C_ORANGE);
+        cv_text(240 - w - 5, 15, &FONT_XS, "SOUND IN BURGER", C_BLACK);
+    }
     cv_rect(0, 27, 240, 1, C_LINE);
     cv_blit(0, 0);
 }
@@ -1685,6 +1693,8 @@ void app_frame(void)
     uint32_t now = plat_ms();
     input();
     my_frame();
+    if (mute_frame())
+        ui.redraw = 1;
     speak();
     if (ui.msg_until && now >= ui.msg_until) {
         ui.msg_until = 0;
@@ -1761,6 +1771,8 @@ int app_expect(const char *what, int *got)
         *got = ui.page;
     else if (!strcmp(what, "playing"))
         *got = seq_play_req;
+    else if (!strcmp(what, "mute"))
+        *got = (int)stack_mute;
     else if (!strcmp(what, "voices"))
         *got = (int)voices_on;
     else if (!strcmp(what, "lim_gr")) {      /* the limiter's deepest gain reduction since the last look, in 0.1 dB */

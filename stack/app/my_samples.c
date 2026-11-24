@@ -268,6 +268,28 @@ static uint32_t crc32_of(const uint8_t *p, uint32_t n)      /* the usual CRC-32 
     return ~c;
 }
 
+/* --- MUTE: the FM-1's own output silent while the app plays its sound (app.h APP_GAIN). It must never stay silent
+ * by mistake: it sounds again when the app says so, when the app has not asked again for MUTE_KEEP_MS, when the
+ * computer is gone or another one comes (plat_usb_session), and at every start --- */
+#define MUTE_KEEP_MS 3000u
+volatile uint8_t stack_mute;
+static struct { uint32_t t, session; uint8_t shown; } mute;
+static void mute_set(uint32_t on)
+{
+    mute.t = plat_ms();
+    mute.session = plat_usb_session();
+    stack_mute = (uint8_t)(on && mute.session);
+}
+static uint32_t mute_frame(void)             /* each frame; 1: it changed (the screen says so) */
+{
+    if (stack_mute && (plat_usb_session() != mute.session || plat_ms() - mute.t >= MUTE_KEEP_MS))
+        stack_mute = 0;
+    if (mute.shown == stack_mute)
+        return 0;
+    mute.shown = stack_mute;
+    return 1;
+}
+
 static uint8_t my_buf[MY_HDR + 32u];     /* a message's data, unpacked (main loop) */
 
 static void my_progress(void);           /* (app.c: the screen says how far the sample has come) */
@@ -393,6 +415,14 @@ int app_sysex(const uint8_t *p, uint32_t n)
         rp_begin(13);
         rp_b(k);
         rp_b(rc);
+        rp_send();
+    } else if (cmd == 20u) {                     /* MUTE: 1 the FM-1's own output silent (asked again at least every
+                                                  * MUTE_KEEP_MS, or it sounds again), 0 it sounds; else just asked */
+        if (na >= 1u && a[0] <= 1u)
+            mute_set(a[0]);
+        rp_begin(20);
+        rp_b(stack_mute);
+        rp_b(MUTE_KEEP_MS / 100u);
         rp_send();
     } else if (cmd == 112u) {                    /* SHOW: STACK placed it already (END); say whether it is there */
         rp_begin(112);
