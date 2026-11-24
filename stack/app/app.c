@@ -156,6 +156,9 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and th
 }
 
 /* ------------------------------------------------------------------ tracks --- */
+#define ENV_AUTO (-1)                    /* RELEASE as before the ENV page: a held sound lets go at DECAY's pace, a hit
+                                          * plays through */
+#define ENV_V_START 75                   /* VELOCITY as before: a quarter of the loudness fixed, the rest the finger's */
 #define NTRK 8u
 #define NSTEP 16u
 #define FILT_DEAD 3                      /* FILTER: -FILT_DEAD .. +FILT_DEAD is off (seven detents wide) */
@@ -165,6 +168,11 @@ typedef struct {
     volatile int8_t pitch;               /* semitones, -24 .. +24 */
     volatile int8_t filt;                /* -FILT_MAX (low-pass, closed) .. 0 off .. +FILT_MAX (high-pass) */
     volatile uint8_t decay, level;       /* 0 .. 100 */
+    /* the envelope (the ENV page). As they start, a track sounds as it did before there was one */
+    volatile uint8_t env_a;              /* ATTACK 0 .. 100: at once (1 ms) .. a fade in of about 2 s */
+    volatile int8_t env_r;               /* RELEASE ENV_AUTO, or 0 .. 100: stops at once (4 ms) .. a tail of about 1 s */
+    volatile uint8_t env_s;              /* SUSTAIN 0 .. 100: the level a held sound settles at, at DECAY's pace */
+    volatile uint8_t env_v;              /* VELOCITY 0 .. 100: how much the finger's weight changes the loudness */
     volatile uint8_t fx[2];              /* the effect in slot A and in slot B (fx.c FX_*) */
     volatile int8_t fxk[2];              /* their knobs, -FX_MAX .. 0 off .. +FX_MAX */
 } track_t;
@@ -311,7 +319,10 @@ static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay,
     v->s1 = voice_fetch(v);
     v->env = 1.0f;
     v->att = 0.0f;
-    v->vel = 0.25f + 0.75f * (float)vel * (1.0f / 127.0f);
+    {   /* VELOCITY: 0 every press as loud as the hardest; 100 the finger's weight alone (75: as before the ENV page) */
+        float va = (float)trk[t].env_v / 100.0f;
+        v->vel = (1.0f - va) + va * (float)vel * (1.0f / 127.0f);
+    }
     v->gain = g;
     v->my = (uint8_t)(li > NSOUNDS ? li - NSOUNDS : 0u);
     v->delay = delay;
@@ -328,8 +339,9 @@ static void voice_release(uint32_t t, uint32_t note, uint32_t seq)
     uint32_t i;
     for (i = 0; i < NVOICE; i++) {
         voice_t *v = &voice[i];
+        /* (a hit plays through, unless the track's RELEASE is set, under 100: then letting go fades it too) */
         if (v->state == V_HELD && v->track == t && v->seq == seq && (seq || v->note == note) &&
-            !(v->s->flags & SF_DRUM))
+            (!(v->s->flags & SF_DRUM) || (trk[t].env_r >= 0 && trk[t].env_r < 100)))
             v->state = V_REL;
     }
 }
@@ -405,20 +417,34 @@ static float mixl[APP_BLOCK], mixr[APP_BLOCK];
 #include "fx.c"                          /* the effects: two slots a track */
 _Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
 
-static void voice_render(voice_t *v, uint32_t n, float dcoef, float rcoef, float rate)
+/* what a track's envelope is this block (render_part works it out from the track's knobs) */
+typedef struct {
+    float ainc;                          /* ATTACK: the fade in's step a frame */
+    float dcoef;                         /* a hit's DECAY (1: none) */
+    float kd, sus;                       /* a held sound: to SUSTAIN at DECAY's pace (sus 1: stays as it is) */
+    float rcoef;                         /* RELEASE */
+} env_t;
+
+static void voice_render(voice_t *v, uint32_t n, const env_t *e, float rate)
 {
     uint32_t i = v->delay;
     float frac = v->frac, inc = v->inc * rate, env = v->env, att = v->att;
     /* (TAPE SPEED: the track's play rate; near a standstill the sound fades, as a stopped tape gives none) */
     float amp = v->vel * v->gain * (VOICE_AMP / 32768.0f) * (rate * 12.0f < 1.0f ? rate * 12.0f : 1.0f);
-    float s0 = v->s0, s1 = v->s1;
+    float s0 = v->s0, s1 = v->s1, ainc = e->ainc, dcoef = e->dcoef, rcoef = e->rcoef, kd = e->kd, sus = e->sus;
+    uint32_t settle = !(v->s->flags & SF_DRUM) && sus < 1.0f;   /* a held sound with SUSTAIN under 100 */
     if (inc > INC_MAX)
         inc = INC_MAX;
     v->delay = 0;
     for (; i < n; i++) {
         if (att < 1.0f)
-            att += 1.0f / 48.0f;             /* ~1 ms in: no click on a sound that starts away from zero */
-        env *= v->state == V_REL ? rcoef : dcoef;
+            att += ainc;                     /* ATTACK (at 0: ~1 ms, no click on a sound that starts away from zero) */
+        if (v->state == V_REL)
+            env *= rcoef;
+        else if (settle)
+            env += (sus - env) * kd;
+        else
+            env *= dcoef;
         tb[i] += (s0 + (s1 - s0) * frac) * amp * env * (att < 1.0f ? att : 1.0f);
         frac += inc;
         while (frac >= 1.0f) {               /* on to the next samples (INC_MAX of them at most) */
@@ -472,6 +498,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         float dcoef = 1.0f, rcoef, a_t = 1.0f, b_t = 0.0f, g_t = lv * lv, a = bus[t].a, b = bus[t].b, g = bus[t].gain;
         float lp1 = bus[t].lp1, lp2 = bus[t].lp2, hp1 = bus[t].hp1, hp2 = bus[t].hp2;
         float fa[2], rate_t = 1.0f, dry = 1.0f;
+        env_t ev;
         uint32_t any = 0, ft[2], fs[2], q;
         for (q = 0; q < 2u; q++) {               /* the two slots: what, which side, how much */
             ft[q] = trk[t].fx[q] < NFX ? trk[t].fx[q] : FX_OFF;
@@ -488,6 +515,14 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         if (s && (s->flags & SF_DRUM) && kd < 100.0f)
             dcoef = fm_expf(-1.0f / (0.020f * fm_exp2f(kd * 0.066f) * 44100.0f));
         rcoef = fm_expf(-1.0f / (0.010f * fm_exp2f(kd * 0.066f) * 44100.0f));
+        {   /* the ENV page's four, into what the voices use */
+            int32_t ea = trk[t].env_a, er = trk[t].env_r;
+            ev.ainc = ea ? (1.0f / 48.0f) * fm_exp2f(-0.11f * (float)ea) : 1.0f / 48.0f;
+            ev.dcoef = dcoef;
+            ev.sus = (float)trk[t].env_s / 100.0f;
+            ev.kd = 1.0f - fm_expf(-1.0f / (0.020f * fm_exp2f(kd * 0.066f) * 44100.0f));
+            ev.rcoef = er < 0 ? rcoef : fm_expf(-1.0f / (0.004f * fm_exp2f((float)er * 0.08f) * 44100.0f));
+        }
         /* FILTER: left of the middle a low-pass closing from 16 kHz to 125 Hz, right a high-pass opening 30 Hz .. 5.4 kHz */
         if (f < -FILT_DEAD)
             a_t = 1.0f - fm_expf(-6.2831853f * 16000.0f * fm_exp2f(-(float)(-f - FILT_DEAD) * 0.14f) * (1.0f / 44100.0f));
@@ -497,7 +532,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             tb[i] = 0.0f;
         for (k = 0; k < NVOICE; k++)
             if (voice[k].state != V_OFF && voice[k].track == t) {
-                voice_render(&voice[k], n, dcoef, rcoef, tape_rate[t]);
+                voice_render(&voice[k], n, &ev, tape_rate[t]);
                 any = 1;
                 on++;
             }
@@ -612,6 +647,10 @@ static void defaults(void)
         trk[t].filt = 0;
         trk[t].decay = list_sound(trk[t].sound) && !(list_sound(trk[t].sound)->flags & SF_DRUM) ? 50 : 100;
         trk[t].level = 80;
+        trk[t].env_a = 0;
+        trk[t].env_r = ENV_AUTO;
+        trk[t].env_s = 100;
+        trk[t].env_v = ENV_V_START;
         trk[t].fx[0] = trk[t].fx[1] = FX_OFF;
         trk[t].fxk[0] = trk[t].fxk[1] = 0;
         for (i = 0; i < NSTEP; i++) {
@@ -636,7 +675,7 @@ void app_init(void)
 }
 
 /* --------------------------------------------------------------------- UI --- */
-enum { PAGE_PLAY, PAGE_STEP, PAGE_FX };
+enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV };
 static struct {
     char msg[2][28];                     /* a short message over the header */
     uint32_t msg_until;
@@ -803,6 +842,20 @@ static void knob_turn(uint32_t k, int32_t e)
     track_t *t = &trk[ui.sel];
     char a[28], n[12];
     a[0] = 0;
+    if (ui.page == PAGE_ENV) {               /* the envelope's page: ATTACK, RELEASE, SUSTAIN, VELOCITY */
+        ui.hot = (int8_t)k;
+        ui.hot_t = plat_ms();
+        if (k == 0u)
+            t->env_a = (uint8_t)clamp(t->env_a + e, 0, 100);
+        else if (k == 1u)
+            t->env_r = (int8_t)clamp(t->env_r + e, ENV_AUTO, 100);
+        else if (k == 2u)
+            t->env_s = (uint8_t)clamp(t->env_s + e, 0, 100);
+        else
+            t->env_v = (uint8_t)clamp(t->env_v + e, 0, 100);
+        ui.redraw = 1;
+        return;
+    }
     if (ui.page == PAGE_FX) {                /* the effects' page: KNOB 1, 3 the effect of slot A, B; KNOB 2, 4 its knob */
         uint32_t q = k >> 1;
         ui.hot = (int8_t)k;
@@ -942,14 +995,15 @@ static void input(void)
         } else if (k == B_PLAY) {
             seq_play_req = (uint8_t)!seq_play_req;
             app_say(seq_play_req ? "PLAY" : "STOP", "");
-        } else if (k == B_SEQ || k == B_FX) {    /* SEQ: the steps and back; FX: the effects and back */
-            uint32_t to = k == B_SEQ ? PAGE_STEP : PAGE_FX;
+        } else if (k == B_SEQ || k == B_FX || k == B_ENV) {   /* SEQ: the steps and back; FX, ENV: their pages and back */
+            uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : PAGE_ENV;
             ui.page = (uint8_t)(ui.page == to ? PAGE_PLAY : to);
             ui.held_step = -1;
             for (e = 0; e < (int32_t)NKEYS; e++)        /* keys held across the change let go */
                 if (ui.keys >> e & 1u)
                     ev_put(QE_OFF, ui.trk_of[e], ui.note_of[e], 0);
-            app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : "TRACKS PAGE", "");
+            app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : ui.page == PAGE_ENV ? "ENV PAGE" :
+                    "TRACKS PAGE", "");
         } else {
             app_say(BTN_NAME[k], "NOT IN THIS VERSION");   /* (never a silent press) */
         }
@@ -978,7 +1032,7 @@ static void input(void)
 
     /* the lights: REC only while there is a sound to undo; SEQ on the step page; PLAY while playing */
     lit_btn = (ui.undo_ok ? 1u << B_REC : 0u) | (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
-              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
+              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
         for (k = 0; k < 16u; k++)
             if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
@@ -1007,7 +1061,8 @@ static void draw_header(void)
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
-        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : "TRACKS", C_GRAY);
+        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : "TRACKS",
+                C_GRAY);
         t[0] = 0;
         text_cat(t, "OCT ");
         t[4] = ui.octave < 0 ? '-' : '+';
@@ -1091,6 +1146,23 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     char v[12];
     cv_begin(240, 52, C_BLACK);
     cv_rect(0, 0, 240, 1, C_LINE);
+    if (ui.page == PAGE_ENV) {               /* the envelope's page: its four knobs and their values */
+        static const char *const EN[4] = {"ATTACK", "RELEASE", "SUSTAIN", "VELOCITY"};
+        for (k = 0; k < 4u; k++) {
+            int32_t x = 4 + (int32_t)k * 59;
+            int hot = ui.hot == (int8_t)k && now - ui.hot_t < 900u;
+            v[0] = 0;
+            if (k == 1u && t->env_r < 0)
+                text_cat(v, "AUTO");
+            else
+                int_text(k == 0u ? t->env_a : k == 1u ? t->env_r : k == 2u ? t->env_s : t->env_v, v);
+            cv_text(x, 3, &FONT_T, EN[k], hot ? C_WHITE : C_GRAY);
+            cv_text(x, 16, &FONT_B, v, hot ? C_WHITE : C_HI);
+        }
+        cv_text(4, 40, &FONT_T, "ENV: BACK TO THE TRACKS", C_DIM);
+        cv_blit(0, 188);
+        return;
+    }
     if (ui.page == PAGE_FX) {                /* the effects' page: what its four knobs are */
         static const char *const FN[4] = {"K1 EFFECT", "K2 KNOB", "K3 EFFECT", "K4 KNOB"};
         for (k = 0; k < 4u; k++) {
@@ -1176,6 +1248,58 @@ static void draw_fx(void)
     }
 }
 
+/* the envelope's page: the selected track's ATTACK, RELEASE, SUSTAIN and VELOCITY, each its name, its value (in
+ * words where a number alone would not say it) and a line that shows where the knob stands */
+static void draw_env(void)
+{
+    static const char *const NAME[4] = {"ATTACK", "RELEASE", "SUSTAIN", "VELOCITY"};
+    const track_t *tr = &trk[ui.sel];
+    const sound_t *snd = list_sound(tr->sound);
+    uint32_t q, hit = snd && (snd->flags & SF_DRUM);
+    char t[28], n[8];
+    for (q = 0; q < 4u; q++) {
+        int32_t val = q == 0u ? tr->env_a : q == 1u ? tr->env_r : q == 2u ? tr->env_s : tr->env_v;
+        int32_t y = q < 2u ? 22 + (int32_t)q * 29 : 2 + (int32_t)(q - 2u) * 29;
+        int32_t lo = q == 1u ? ENV_AUTO : 0, w = (val - lo) * 226 / (100 - lo);
+        uint32_t off = q == 2u && hit;           /* (a hit is never held: SUSTAIN has nothing to hold) */
+        int hot = ui.hot == (int8_t)q && plat_ms() - ui.hot_t < 900u;
+        if (!(q & 1u)) {
+            cv_begin(240, 80, C_BLACK);
+            if (!q) {                            /* whose envelope this is */
+                trk_text(ui.sel, n);
+                cv_text(6, 2, &FONT_B, n, C_ORANGE);
+                list_name(tr->sound, t);
+                cv_text(40, 2, &FONT_S, t, C_WHITE);
+            }
+        }
+        cv_text(6, y, &FONT_B, NAME[q], off ? C_DIM : hot ? C_ORANGE : C_WHITE);
+        t[0] = 0;
+        if (off) {
+            text_cat(t, "A HIT: NOT USED");
+        } else if (q == 1u && val < 0) {
+            text_cat(t, hit ? "AUTO: PLAYS THROUGH" : "AUTO: AS DECAY");
+        } else {
+            int_text(val, t);
+            if (q == 0u && !val)
+                text_cat(t, " AT ONCE");
+            else if (q == 1u && !val)
+                text_cat(t, " STOPS AT ONCE");
+            else if (q == 3u && !val)
+                text_cat(t, " ALL THE SAME");
+            else if (q == 3u && val == 100)
+                text_cat(t, " BY THE FINGER");
+        }
+        cv_text(234 - text_w(&FONT_XS, t), y + 1, &FONT_XS, t, off ? C_DIM : C_HI);
+        cv_rect(6, y + 20, 228, 1, C_DIM);       /* the knob's line */
+        if (!off) {
+            cv_rect(6, y + 19, w, 3, C_ORANGE);
+            cv_rect(6 + w - 1, y + 16, 3, 9, C_WHITE);
+        }
+        if (q & 1u)
+            cv_blit(0, 28 + (q >> 1) * 80u);
+    }
+}
+
 #define TITLE_MS 2000u                   /* the title after a start: the name and the version, large */
 static void draw_title(void)                 /* in the tracks' place; the keys, the knobs and the header work meanwhile */
 {
@@ -1195,6 +1319,8 @@ static void draw(void)
         draw_title();
     else if (ui.page == PAGE_FX)
         draw_fx();
+    else if (ui.page == PAGE_ENV)
+        draw_env();
     else if (ui.page == PAGE_STEP)
         draw_steps();
     else
@@ -1395,6 +1521,14 @@ int app_expect(const char *what, int *got)
         *got = rx.on;
     else if (!strncmp(what, "trk", 3) && what[3] >= '1' && what[3] <= '8')  /* trkN: track N's place in the list */
         *got = trk[what[3] - '1'].sound;
+    else if (!strcmp(what, "env_a"))         /* the selected track's ATTACK, RELEASE (-1 AUTO), SUSTAIN, VELOCITY */
+        *got = trk[ui.sel].env_a;
+    else if (!strcmp(what, "env_r"))
+        *got = trk[ui.sel].env_r;
+    else if (!strcmp(what, "env_s"))
+        *got = trk[ui.sel].env_s;
+    else if (!strcmp(what, "env_v"))
+        *got = trk[ui.sel].env_v;
     else if (!strcmp(what, "fxa") || !strcmp(what, "fxb"))       /* the selected track's effect in slot A, B */
         *got = trk[ui.sel].fx[what[2] - 'a'];
     else if (!strcmp(what, "fxak") || !strcmp(what, "fxbk"))     /* and its knob */
