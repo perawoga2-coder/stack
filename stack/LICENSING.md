@@ -10,6 +10,7 @@ STACK is under the Mozilla Public License 2.0 (MPL-2.0), file by file: each sour
 | `app/my_samples.c`: the samples the Burger Studio app sends (the messages, the slots in the flash, their loudness) | written for STACK from the app's own side of the protocol (Maker Hip's `Fm1SampleLink.kt`); no code from Felucca or the Burger Studio firmware | MPL-2.0 |
 | `app/fx.c`: the effects | written for STACK; ROBOT follows the idea of the Burger Studio app's own `RobotFx` (Maker Hip's `Robot.kt`) | MPL-2.0 |
 | `app/looper.c`: the looper on track 8 | written for STACK | MPL-2.0 |
+| `app/clock.c`: the MIDI clock out and in | written for STACK | MPL-2.0 |
 | The IMA ADPCM decoder in `app/app.c` and the encoder in `tools/make_sounds.py` | written for STACK from the IMA standard (its two tables and its algorithm) | MPL-2.0 (the code) |
 
 Rules this project keeps:

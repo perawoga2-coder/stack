@@ -363,14 +363,19 @@ static void my_voices_end(uint32_t mask)
 #endif
 }
 
+#include "clock.c"                        /* the clock out and in */
 static void midi_in(void)                    /* audio interrupt: MIDI in plays the selected track */
 {
     uint32_t pkt;
     int port;
     extern volatile uint8_t ui_sel_isr;
-    while (plat_midi_in(&pkt, &port)) {
+    uint32_t stamp;
+    while (ck_midi_in(&pkt, &stamp, &port)) {
         uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24;
-        if ((st & 0xF0u) == 0x90u && d2)
+        if (st >= 0xF0u) {                   /* the clock, Start, Continue, Stop, Song Position: from USB only */
+            if (port == PORT_USB)
+                ck_midi(st, d1, d2 & 0x7Fu, stamp);
+        } else if ((st & 0xF0u) == 0x90u && d2)
             voice_start(ui_sel_isr, d1, d2, 0, 0, 0);
         else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u)
             voice_release(ui_sel_isr, d1, 0);
@@ -393,21 +398,131 @@ static void seq_fire(uint32_t step, uint32_t delay)
 
 static int32_t seq_bar_off;                  /* where in this block the pattern's first step starts (-1: not in it) */
 static void seq_start_hook(void);            /* (the looper: its loop starts with the pattern) */
+static float seq_xpos;                       /* following: the place in the pattern, in clock ticks (0 .. 96) */
+static uint8_t seq_ext;                      /* the last block followed a clock in */
+static float ck_left;                        /* leading: frames to the next clock tick out */
+static float seq_phase, seq_dphase;          /* the place in the pattern at the block's start (0 .. 1) and a frame's share */
+static struct { float e; } seq_dbg;          /* (the simulator's checks: the furthest the place was from the clock's) */
+
+static void seq_stop_now(void)
+{
+    uint32_t t;
+    seq_running = 0;
+    for (t = 0; t < NTRK; t++)
+        voice_release(t, 0, 1);
+}
+
+/* following a clock in: the place the clock gives for when this block is heard, and the sequencer steered to it */
+static void seq_block_ext(uint32_t n, uint32_t tblock)
+{
+    const float pf = cki.p * (1.0f / CK_T24_FRAME);              /* frames a tick */
+    const float raw = ck_wrap((float)cki.free_ + (float)(int32_t)(tblock + CK_LEAD - cki.tp) / cki.p);
+    float tgt, e, adv, b, lim;
+    uint32_t placed = 0;
+    if (!seq_ext) {                          /* it led till now: the place stays, the tempo is the clock's from here */
+        seq_ext = 1;
+        if (seq_running && !cki.locate) {
+            seq_xpos = ck_wrap((float)seq_next * 6.0f - seq_left * 6.0f / seq_sf);
+            cki.base = ck_wrap(raw - seq_xpos);
+        }
+    }
+    if (seq_play_req && (!seq_running || cki.locate)) {
+        if (!cki.locate)                     /* PLAY on the FM-1 while it follows: from step 1 now, at the clock's tempo */
+            cki.base = raw;
+        seq_running = 1;
+        seq_xpos = ck_wrap(raw - cki.base);
+        cki.locate = 0;
+        placed = 1;
+        seq_start_hook();
+    } else if (!seq_play_req && seq_running) {
+        seq_stop_now();
+    }
+    cki.locate = 0;
+    seq_phase = seq_xpos * (1.0f / CK_BAR);
+    seq_dphase = 0.0f;
+    if (!seq_running)
+        return;
+    if (placed) {                            /* the step it lands on, if it has only just begun, sounds now */
+        uint32_t st = (uint32_t)(seq_xpos * (1.0f / 6.0f));
+        if (seq_xpos - (float)st * 6.0f < 1.5f) {
+            if (!(st % NSTEP))
+                seq_bar_off = 0;
+            seq_fire(st % NSTEP, 0);
+        }
+    }
+    tgt = ck_wrap(raw - cki.base);
+    e = tgt - seq_xpos;
+    if (e > CK_BAR * 0.5f)
+        e -= CK_BAR;
+    if (e < -CK_BAR * 0.5f)
+        e += CK_BAR;
+    if (e > seq_dbg.e || -e > seq_dbg.e)
+        seq_dbg.e = e < 0.0f ? -e : e;
+    adv = (float)n / pf;
+    lim = adv * 0.02f;
+    e *= 0.1f;
+    adv += e > lim ? lim : e < -lim ? -lim : e;
+    seq_dphase = adv * (1.0f / CK_BAR) / (float)n;
+    for (b = 6.0f * (float)((uint32_t)(seq_xpos * (1.0f / 6.0f)) + 1u); b <= seq_xpos + adv; b += 6.0f) {
+        uint32_t off = (uint32_t)((b - seq_xpos) / adv * (float)n), st = (uint32_t)(b * (1.0f / 6.0f) + 0.5f) % NSTEP;
+        if (off >= n)
+            off = n - 1u;
+        if (!st)
+            seq_bar_off = (int32_t)off;
+        seq_fire(st, off);
+    }
+    seq_xpos = ck_wrap(seq_xpos + adv);
+}
+
 static void seq_block(uint32_t n)
 {
-    const float step_frames = 44100.0f * 60.0f / (SEQ_BPM * 4.0f);
+    const uint32_t tblock = ck_block_time();
     seq_bar_off = -1;
+    ck_block_done(n);
+    if (ck_follow && (int32_t)(ck_now() - cki.last) > (int32_t)(CK_LOST_MS * 24000u)) {
+        ck_follow = 0;                       /* the clock stopped coming: the FM-1 leads again, at that tempo */
+        cki.run = 0;
+        cki.pend = 0;
+        ck_ui |= 2u;
+        ck_sent.fresh = 1;
+    }
+    if (cki.pend && (int32_t)(ck_now() - cki.pend_t) > (int32_t)(CK_LOST_MS * 24000u))
+        cki.pend = 0;                        /* (a Start with no clock after it) */
+    if (ck_follow) {
+        seq_block_ext(n, tblock);
+        return;
+    }
+    if (seq_ext) {                           /* it followed till now: on from this place, at the tempo it had */
+        const float pf = cki.p * (1.0f / CK_T24_FRAME);
+        uint32_t nx = (uint32_t)(seq_xpos * (1.0f / 6.0f)) + 1u;
+        seq_ext = 0;
+        seq_sf = 6.0f * pf;
+        seq_next = nx % NSTEP;
+        seq_left = ((float)nx * 6.0f - seq_xpos) * pf;
+        ck_left = seq_left;
+        while (ck_left >= pf)
+            ck_left -= pf;
+    }
+    {
+    const float step_frames = seq_sf;
     if (seq_play_req && !seq_running) {      /* PLAY: from step 1, now */
         seq_running = 1;
         seq_next = 0;
         seq_left = 0.0f;
         seq_start_hook();
+        ck_send(0xFAu, tblock + CK_LEAD - 36000u);   /* Start, 1.5 ms before the tick that is its first */
+        ck_left = 0.0f;
     } else if (!seq_play_req && seq_running) {
-        uint32_t t;
-        seq_running = 0;
-        for (t = 0; t < NTRK; t++)
-            voice_release(t, 0, 1);
+        seq_stop_now();
+        ck_send(0xFCu, tblock + CK_LEAD);
     }
+    while (ck_left < (float)n) {             /* the clock out: 24 a quarter note, playing or not */
+        ck_send(0xF8u, tblock + CK_LEAD + (uint32_t)(ck_left * CK_T24_FRAME));
+        ck_left += step_frames * (1.0f / 6.0f);
+    }
+    ck_left -= (float)n;
+    seq_phase = seq_running ? ck_wrap((float)seq_next * 6.0f - seq_left * 6.0f / step_frames) * (1.0f / CK_BAR) : 0.0f;
+    seq_dphase = 1.0f / (step_frames * (float)NSTEP);
     if (!seq_running)
         return;
     while (seq_left < (float)n) {
@@ -418,6 +533,7 @@ static void seq_block(uint32_t n)
         seq_left += step_frames;
     }
     seq_left -= (float)n;
+    }
 }
 
 #define VOICE_AMP 1.0f                   /* a voice at full velocity, before its track's LEVEL */
@@ -426,10 +542,9 @@ static float mixl[APP_BLOCK], mixr[APP_BLOCK];
 #include "fx.c"                          /* the effects: two slots a track */
 _Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
 #include "looper.c"                      /* the looper on track 8 */
-#define PAT_FRAMES ((uint32_t)(44100.0f * 60.0f / (SEQ_BPM * 4.0f) * (float)NSTEP))   /* the pattern's length */
 static float rb[APP_BLOCK];                  /* a track's voices that a take records (played by hand) */
 static float recf[NTRK][4];                  /* and the track's FILTER on them alone */
-static void seq_start_hook(void) { lp.bar = (uint8_t)(lp.bars - 1u); }
+static void seq_start_hook(void) { lp.bar = (uint8_t)(lp.bars - 1u); lp.resync = 1; }
 
 /* what a track's envelope is this block (render_part works it out from the track's knobs) */
 typedef struct {
@@ -545,7 +660,12 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         for (i = 0; i < n; i++)
             tb[i] = 0.0f;
         if (loop8) {                             /* track 8 as the looper: the loop is its sound (no voices) */
-            any = loop_block(tb, n, seq_bar_off, seq_running, PAT_FRAMES);
+            {   /* the loop holds to the bar by its own count while the FM-1 leads at 120 and the loop is a pattern of
+                 * that long; else (a clock in, or a tempo taken from one) it is steered to the bar: looper.c */
+                const uint32_t pat = pat_frames();
+                const int steer = lp.bars == 1u && (ck_follow || seq_sf != SEQ_SF_120 || (lp.total && lp.total != pat));
+                any = loop_block(tb, n, seq_bar_off, seq_running, pat, steer ? seq_phase : -1.0f, seq_dphase);
+            }
             g_t *= 1.0f / 0.64f;                 /* (LEVEL at its 80: the loop as it was played) */
         } else {
             for (k = 0; k < NVOICE; k++)
@@ -621,7 +741,13 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         bus[t].hp1 = fm_flush(hp1);
         bus[t].hp2 = fm_flush(hp2);
     }
-    fx_buses(mixl, mixr, n, 44100.0f * 60.0f / (SEQ_BPM * 4.0f));
+    {   /* the echoes' tempo: the clock's, taken when it has moved by 0.3 % (not at every tick's wobble) */
+        static float fx_sf = SEQ_SF_120;
+        const float sf = ck_tick_frames() * 6.0f, d = sf - fx_sf;
+        if (d > fx_sf * 0.003f || -d > fx_sf * 0.003f)
+            fx_sf = sf;
+        fx_buses(mixl, mixr, n, fx_sf);
+    }
     voices_on = on;
     /* the master's limiter: the mix is held back LIM_AHEAD frames, so the gain is already down when a peak comes out.
      * The level's follower rises at once and falls over ~0.25 s; under LIM_T nothing is touched (gain 1) */
@@ -712,6 +838,15 @@ void app_init(void)
     lp.div = 2;
     lp.bars = 1;
     stack_mute = 0;                          /* a start always sounds */
+    memset(&cki, 0, sizeof cki);             /* and leads, at 120 */
+    memset(&ck_tb, 0, sizeof ck_tb);
+    memset(&ck_sent, 0, sizeof ck_sent);
+    ck_follow = 0;
+    ck_ui = 0;
+    ck_r = ck_w;
+    seq_sf = SEQ_SF_120;
+    seq_ext = 0;
+    ck_left = 0.0f;
     memset(&mute, 0, sizeof mute);
     memset(my, 0, sizeof my);                /* (a start is from nothing: the simulator's restart keeps the RAM) */
     ms.slot = -1;
@@ -866,7 +1001,7 @@ static void looper_add(void)                 /* OCT+: a layer, one pass of the p
     } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
         app_say("RECORDING", "WAIT");
     } else {
-        uint32_t div = lp.has ? lp.div : looper_fit(PAT_FRAMES * lp.bars);
+        uint32_t div = lp.has ? lp.div : looper_fit(pat_frames() * lp.bars);
         if (!div) {
             app_say("PATTERN TOO LONG", "TO LOOP");
             return;
@@ -1272,6 +1407,8 @@ static void draw_header(void)
             w = t;
         } else if (lp.state == LP_ARMED) {
             w = "WAITS FOR THE BAR";
+        } else if (lp.has && lp.drift) {
+            w = "LOOP OUT OF TIME";
         } else if (lp.has) {
             int_text(lp.layers, c);
             text_cat(t, c);
@@ -1306,7 +1443,11 @@ static void draw_header(void)
         cv_text(104, 5, &FONT_T, t, ui.cpu >= 70u ? C_WHITE : C_DIM);
         cv_text(200, 2, &FONT_XS, seq_play_req ? "PLAY" : "STOP", seq_play_req ? C_HI : C_DIM);
     }
-    cv_text(6, 15, &FONT_T, APP_VERSION, C_GRAY);
+    {
+        int32_t x = cv_text(6, 15, &FONT_T, APP_VERSION, C_GRAY);
+        if (!(ui.loop_mode && now >= ui.msg_until && ((ui.dn_t && !ui.dn_fired) || lp.state == LP_REC)))
+            cv_text(x + 8, 15, &FONT_T, ck_follow ? "CLOCK: BURGER" : "CLOCK: FM-1", ck_follow ? C_HI : C_GRAY);
+    }
     if (stack_mute && !(ui.loop_mode && now >= ui.msg_until && ((ui.dn_t && !ui.dn_fired) || lp.state == LP_REC))) {
         /* the app plays the FM-1's sound: said on the second line, on every page (a looper's bar there goes first) */
         int32_t w = text_w(&FONT_XS, "SOUND IN BURGER");
@@ -1695,6 +1836,25 @@ void app_frame(void)
     my_frame();
     if (mute_frame())
         ui.redraw = 1;
+    if (ck_ui) {                             /* the clock: who leads now, and what the leader's transport did */
+        uint32_t ev = ck_ui;
+        ck_ui = 0;
+        if (ev & 2u)
+            app_say("CLOCK LOST:", "FM-1 LEADS");
+        else if (ev & 8u)
+            app_say("STOP", "");
+        else if (ev & 4u)
+            app_say("PLAY", "");
+        else if (ev & 1u)
+            app_say("CLOCK:", "BURGER");
+        ui.redraw = 1;
+    }
+    {
+        static uint8_t drift_said;
+        if (lp.drift && !drift_said)         /* the tempo changed under a loop: it does not stretch */
+            app_say("TEMPO CHANGED:", "LOOP OUT OF TIME");
+        drift_said = lp.drift;
+    }
     speak();
     if (ui.msg_until && now >= ui.msg_until) {
         ui.msg_until = 0;
@@ -1771,6 +1931,36 @@ int app_expect(const char *what, int *got)
         *got = ui.page;
     else if (!strcmp(what, "playing"))
         *got = seq_play_req;
+    else if (!strcmp(what, "notes_out"))     /* messages sent over USB, the clock, Start and Stop left out */
+        *got = (int)plat_midi_count(PORT_USB, 1);
+    else if (!strcmp(what, "clk_follow"))
+        *got = (int)ck_follow;
+    else if (!strcmp(what, "clk_bpm10"))     /* the tempo now, in tenths of a beat a minute */
+        *got = (int)(44100.0f * 60.0f * 10.0f / (ck_tick_frames() * 24.0f) + 0.5f);
+    else if (!strcmp(what, "clk_out_span")) {    /* clock out: the longest gap less the shortest since the last look, in us */
+        *got = (int)((ck_sent.ivmax - ck_sent.ivmin) / 24u);
+        printf("  clock out: gaps %.2f .. %.2f ms\n", (double)ck_sent.ivmin / 24000.0, (double)ck_sent.ivmax / 24000.0);
+        ck_sent.ivmin = ck_sent.ivmax = 0;
+    } else if (!strcmp(what, "clk_out_gap"))     /* and the longest, in us */
+        *got = (int)(ck_sent.ivmax / 24u);
+    else if (!strcmp(what, "clk_ticks"))     /* clock ticks sent since the start */
+        *got = (int)ck_sent.clocks;
+    else if (!strcmp(what, "clk_starts"))
+        *got = (int)ck_sent.starts;
+    else if (!strcmp(what, "clk_stops"))
+        *got = (int)ck_sent.stops;
+    else if (!strcmp(what, "clk_err")) {     /* following: the furthest the place was from the clock's, in 1/1000 tick */
+        *got = (int)(seq_dbg.e * 1000.0f);
+        seq_dbg.e = 0.0f;
+    } else if (!strcmp(what, "clk_step"))    /* the step that sounds */
+        *got = (int)seq_step_now;
+    else if (!strcmp(what, "loop_drift"))
+        *got = (int)lp.drift;
+    else if (!strcmp(what, "loop_nudge")) {  /* the most the loop was sped or slowed since the last look, in millionths */
+        *got = (int)(lp.nudge * 1000000.0f + 0.5f);
+        lp.nudge = 0.0f;
+    } else if (!strcmp(what, "loop_total"))
+        *got = (int)lp.total;
     else if (!strcmp(what, "mute"))
         *got = (int)stack_mute;
     else if (!strcmp(what, "voices"))

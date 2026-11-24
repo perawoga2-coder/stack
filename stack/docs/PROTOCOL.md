@@ -1,6 +1,7 @@
 # STACK: messages from the Burger Studio app
 
-Everything here goes over USB MIDI as SysEx. Every message, both ways, starts the same way:
+Two things go over USB MIDI: the app's own messages, as SysEx (this part and MUTE below), and the clock, as the
+standard MIDI real-time bytes (the last part, CLOCK). Every SysEx message, both ways, starts the same way:
 
     F0 7D 46 4C <command> <data ...> F7
 
@@ -67,3 +68,59 @@ sounds again at once (the change is a 6 ms fade, no click).
 - The keys, the sequencer, the looper and everything on the screen work as before.
 - While muted the FM-1's screen shows `SOUND IN BURGER`, top right; it goes when the FM-1 sounds again.
 - Nothing is saved: the mute is never remembered.
+
+## CLOCK (since 0.4.2-test)
+
+Standard MIDI real-time messages over USB MIDI, no SysEx. There is no setting on the FM-1 and no message that says
+who leads: **whoever sends the clock leads.** The app's MASTER CLOCK switch decides by sending clock or not.
+
+| Byte(s) | Name | Meaning |
+|---|---|---|
+| `F8` | Clock | one tick; 24 ticks a quarter note, so 6 ticks a step (a sixteenth), 96 ticks a 16-step pattern |
+| `FA` | Start | play from step 1; **the next `F8` is the first step** |
+| `FB` | Continue | play on from where it stopped (or from the Song Position sent since); the next `F8` is that place |
+| `FC` | Stop | stop |
+| `F2 ll mm` | Song Position | the place in sixteenths (steps), `ll` the low 7 bits, `mm` the high 7 bits |
+
+### Switch at DEVICE: the FM-1 leads (this is how it starts)
+
+The app sends **no** `F8`, `FA`, `FB`, `FC`. The FM-1 sends:
+
+- `F8` all the time, playing or stopped, at its tempo (120 now: a tick every 20.83 ms);
+- `FA` when PLAY is pressed, about 1.5 ms before the tick that is step 1;
+- `FC` when it stops. It never sends `FB` or `F2`.
+
+What the app should do with it:
+
+- take the tempo from the average of several ticks, not from one gap;
+- at `FA` start from the top, on the next `F8`. The gap between the last tick before `FA` and the first after it is
+  shorter than a tick (the FM-1 starts the bar at once): leave that one gap out of the tempo;
+- **never send the FM-1's clock back to it** (no MIDI thru of real-time bytes). The FM-1 would take it for a leader's
+  clock and follow its own echo.
+
+### Switch at BURGER: the app leads
+
+The app sends `F8` at its tempo, and the FM-1 follows from the first tick:
+
+- the FM-1 stops sending its own `F8`, `FA`, `FC` for as long as it follows, and never sends on what comes in;
+- its screen shows `CLOCK: BURGER` (else `CLOCK: FM-1`);
+- its tempo is the app's (25 to 312 beats a minute). Ticks a few milliseconds early or late are smoothed out;
+- to start: `FA`, then the ticks; the first tick after `FA` is step 1. To stop: `FC`.
+- to start somewhere else: while stopped, `F2 ll mm`, then `FB`, then the ticks. The pattern is 16 steps, so the
+  place is taken modulo 16 steps. A Song Position sent while playing is ignored;
+- **keep sending `F8` while stopped.** If no tick comes for 0.5 s the FM-1 takes the clock as gone: it leads again,
+  at the tempo it last followed, shows `CLOCK LOST: FM-1 LEADS` and sends its own clock again. If it was playing it
+  plays on. The next tick from the app makes it follow again.
+- so when the switch goes back to DEVICE, the app just stops sending `F8`; half a second later the FM-1 leads.
+- while it leads, the app must ignore the clock that comes from the FM-1 for its own transport.
+
+PLAY on the FM-1 still works while it follows: it starts and stops the FM-1's own pattern at the app's tempo, and
+sends nothing.
+
+### The looper and the clock
+
+A loop on the FM-1 is recorded sound: it is as long as one pattern at the tempo it was recorded at, and it does not
+stretch. Under the app's clock it is kept on the bar by playing up to 0.1 % faster or slower, which covers the small
+drift between two devices. **A real change of tempo in the app while a loop exists puts the loop out of time**; the
+FM-1 shows `TEMPO CHANGED: LOOP OUT OF TIME` and plays on. So the app should not change tempo under a loop without
+telling the user (or the user clears the loop and records again).

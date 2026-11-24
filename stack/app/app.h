@@ -24,6 +24,14 @@ int app_sysex(const uint8_t *p, uint32_t n);
 extern volatile uint8_t stack_mute;
 #define APP_GAIN(m) (stack_mute ? 0u : (m) * (m) >> 12)
 
+/* the clock (clock.c): its ticks out leave from the 10 kHz tick, on time */
+#define APP_TICK_FAST
+void app_tick_fast(void);
+#ifdef PLAT_HOST
+#define APP_HOST_MS                      /* (the simulator: MIDI in taken and stamped each millisecond) */
+void app_host_ms(void);
+#endif
+
 /* the store: STACK saves nothing yet of its own (no plat_store_save call in the app); the panel calibration is the
  * platform's. The offsets are fm1-base's template's */
 enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_NOBJ };

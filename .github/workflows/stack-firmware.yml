@@ -42,7 +42,7 @@ jobs:
         run: |
           cd stack
           base/.venv/bin/python base/tools/build.py app --host
-          for t in basic limiter sounds receive keys fx env looper mute; do app/build/host/stack_host app/tests/$t.txt app/build/host; done
+          for t in basic limiter sounds receive keys fx env looper mute clock; do app/build/host/stack_host app/tests/$t.txt app/build/host; done
 
       - name: Build
         id: b

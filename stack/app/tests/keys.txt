@@ -573,7 +573,8 @@ expect voices 1
 key 26 up
 wait 250
 expect voices 0
-expect midi_out 0
+# (the clock goes out since 0.4.2: what is checked is that no note does)
+expect notes_out 0
 tap OCT+
 wait 30
 tap OCT+
