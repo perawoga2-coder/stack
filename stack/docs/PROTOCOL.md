@@ -136,13 +136,18 @@ answers no SysEx over Bluetooth.
 | | Over USB | Over Bluetooth |
 |---|---|---|
 | Notes in (play the selected track) | yes | yes |
-| Notes out | none | none |
+| Notes out (the FM-1's own keys, channel 1; since 0.6.1-test) | none | yes |
 | Clock, Start, Stop out (the FM-1 leads) | yes | yes, while a link is up |
 | Clock, Start, Continue, Stop, Song Position in | followed | followed |
 | SysEx (samples, MUTE) | yes | no |
 
 - The rules of CLOCK above hold on both: whoever sends `F8` leads. The FM-1 follows the clock from the port it comes
   in on first (USB or Bluetooth), and from that one only, until it stops for 0.5 s.
+- The keys' notes go out over Bluetooth only: a note on with the key's velocity, a note off when it is let go
+  (`90 nn vv`, `80 nn 00`), as the keys are pressed, whatever the ARP makes of them. **The app must not play them on
+  its drum pads by itself** (that was the echo of 0.2.2: the FM-1's keys sounding as drums in the app).
+- Bluetooth can be turned off on the FM-1 (GLO page): it then cannot be found or connected to. It is on at every
+  power-on. GLO's DISCONNECT ends the link and lets the FM-1 be found again a moment later.
 - **Nothing is passed from one to the other**: what comes in over USB never goes out over Bluetooth, nor the other
   way. And nothing that comes in is sent back.
 - While it follows a clock over Bluetooth the FM-1 shows `CLOCK: BT` and, once, `BT CLOCK: CABLE IS STEADIER`.

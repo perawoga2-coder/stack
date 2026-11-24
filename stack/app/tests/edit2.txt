@@ -1,0 +1,257 @@
+# STACK in the host simulator: EDIT page 2 (SWING, FIT, TIME SIG, TEMPO).
+#   app/build/host/stack_host app/tests/edit2.txt app/build/host
+master 4096
+wait 2200
+# the piano on track 5
+turn ALGO 4
+wait 40
+expect track 5
+# EDIT: page 1, EDIT again: page 2, again: back to the tracks
+tap EDIT
+wait 40
+expect page 5
+tap EDIT
+wait 40
+expect page 7
+shot edit2_start.png
+tap EDIT
+wait 40
+expect page 0
+tap EDIT
+wait 40
+tap EDIT
+wait 40
+expect page 7
+# as it starts: straight, FIT off, 4/4 (16 steps), 120
+expect swing 50
+expect fit 0
+expect sig 2
+expect seq_len 16
+expect clk_bpm10 1200
+# the knobs stop at their ends
+turn K1 60
+wait 40
+expect swing 75
+turn K1 -60
+wait 40
+expect swing 50
+turn K2 20
+wait 40
+expect fit 5
+turn K2 -20
+wait 40
+expect fit 0
+turn K3 20
+wait 40
+expect sig 4
+expect seq_len 14
+turn K3 -20
+wait 40
+expect sig 0
+expect seq_len 8
+turn K3 2
+wait 40
+expect sig 2
+expect seq_len 16
+turn K4 300
+wait 40
+expect clk_bpm10 2400
+turn K4 -300
+wait 40
+expect clk_bpm10 400
+turn K4 80
+wait 40
+expect clk_bpm10 1200
+# --- SWING 66: the off-beat sixteenths come 40 ms late (a step is 125 ms); the on-beat ones stay where they are
+turn K1 16
+wait 40
+expect swing 66
+shot edit2_swing.png
+tap PLAY
+wait 60
+# (PLAY 140 ms ago: straight, step 2 would have begun at 125 ms)
+expect clk_step 0
+wait 50
+expect clk_step 1
+wait 80
+expect clk_step 2
+wait 105
+expect clk_step 2
+wait 50
+expect clk_step 3
+# the clock out is not swung: its ticks stay even
+expect clk_out_span <100000
+wait 1000
+expect clk_out_span <150
+tap PLAY
+wait 100
+turn K1 -16
+wait 40
+expect swing 50
+# --- TIME SIG 3/4: the pattern is 12 steps, for all the tracks: step 1 comes round after 1.5 s
+turn K3 -1
+wait 40
+expect sig 1
+expect seq_len 12
+shot edit2_three_four.png
+tap PLAY
+wait 1360
+expect clk_step 11
+wait 125
+expect clk_step 0
+tap PLAY
+wait 100
+# the step page shows 12 steps, grouped in quarter notes; a key past them says so
+tap EDIT
+wait 40
+tap SEQ
+wait 40
+expect page 1
+shot edit2_steps_three_four.png
+key w13 down 100
+wait 20
+key w13 up
+wait 40
+expect step14 0
+key w2 down 100
+wait 20
+key w2 up
+wait 40
+expect step3 60
+key w2 down 100
+wait 20
+key w2 up
+wait 40
+expect step3 0
+tap SEQ
+wait 40
+# the looper's loop is a pattern long: 12 steps at 120 are 1.5 s (66 150 frames)
+press OCT-
+press OCT+
+wait 60
+release OCT+
+release OCT-
+wait 60
+expect loop_mode 1
+tap PLAY
+wait 100
+tap OCT+
+wait 1500
+key w4 down 100
+wait 600
+key w4 up
+wait 1200
+expect loop_layers 1
+expect loop_total 66150
+expect loop_drift 0
+# 7/8 with a loop of 3/4 there: the loop cannot follow, and says so
+tap EDIT
+wait 40
+tap EDIT
+wait 40
+turn K3 3
+wait 40
+expect sig 4
+expect seq_len 14
+wait 2500
+expect loop_drift 1
+shot edit2_seven_eight_loop.png
+press OCT-
+wait 900
+release OCT-
+wait 200
+expect loop_has 0
+tap PLAY
+wait 100
+press OCT-
+press OCT+
+wait 60
+release OCT+
+release OCT-
+wait 60
+expect loop_mode 0
+tap EDIT
+wait 40
+tap SEQ
+wait 40
+shot edit2_steps_seven_eight.png
+tap SEQ
+wait 40
+tap EDIT
+wait 40
+tap EDIT
+wait 40
+expect page 7
+turn K3 -2
+wait 40
+expect sig 2
+# 6/8 is 12 steps too, in two groups of six
+turn K3 1
+wait 40
+expect sig 3
+expect seq_len 12
+turn K3 -1
+wait 40
+# --- TEMPO 90: the clock out follows (a tick every 27.8 ms), the steps are 167 ms
+turn K4 -30
+wait 40
+expect clk_bpm10 900
+shot edit2_tempo.png
+expect clk_out_span <100000
+wait 1500
+expect clk_out_gap >27600
+expect clk_out_gap <27900
+turn K4 30
+wait 40
+expect clk_bpm10 1200
+# --- FIT 1 BAR: the piano (a second long) lasts a bar, 2 s at 120: an octave lower
+turn K2 3
+wait 40
+expect fit 3
+shot edit2_fit.png
+wav edit2_fit_one_bar.wav
+key w4 down 100
+wait 1700
+expect voices 1
+wait 500
+expect voices 0
+key w4 up
+wait 100
+wavstop
+# FIT 1/4 BAR: half a second, an octave higher
+turn K2 -2
+wait 40
+expect fit 1
+wav edit2_fit_quarter_bar.wav
+key w4 down 100
+wait 350
+expect voices 1
+wait 350
+expect voices 0
+key w4 up
+wavstop
+turn K2 -1
+wait 40
+expect fit 0
+# FIT is the track's own: track 1's is off; SWING and TIME SIG are everyone's
+turn K1 10
+tap EDIT
+wait 40
+turn ALGO -4
+wait 40
+expect track 1
+expect fit 0
+expect swing 60
+# under a clock in the TEMPO knob does nothing and says why
+tap EDIT
+wait 40
+tap EDIT
+wait 40
+clock 60 20
+expect clk_follow 1
+turn K4 10
+clock 10 20
+expect clk_bpm10 >1240
+expect clk_bpm10 <1260
+shot edit2_tempo_clock_in.png
+expect lim_clips 0

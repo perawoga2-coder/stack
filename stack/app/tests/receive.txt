@@ -124,6 +124,8 @@ expect ed_start 0
 expect ed_rev 0
 tap EDIT
 wait 40
+tap EDIT
+wait 40
 expect page 0
 # MY 2 KIT: four hits, onto track 8 (empty); its keys are C4, C#4, D4, D#4
 sysex_out

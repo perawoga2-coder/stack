@@ -21,7 +21,8 @@
 #define CK_T24_FRAME (24000000.0f / 44100.0f)        /* plat_ticks24's ticks a frame */
 #define CK_LEAD ((uint32_t)((float)APP_BLOCK * CK_T24_FRAME))   /* a block: what is rendered now is heard about then */
 #define CK_LOST_MS 500u
-#define CK_BAR 96.0f                                 /* clock ticks in the pattern (16 steps of 6) */
+#define CK_BAR ((float)seq_len * 6.0f)               /* clock ticks in the pattern (its steps, 6 each: 96 in 4/4) */
+#define CK_BARU ((uint32_t)seq_len * 6u)
 #define SEQ_SF_120 (44100.0f * 60.0f / (120.0f * 4.0f))   /* frames a step at 120 */
 
 /* --- time: plat_ticks24 on the FM-1; in the simulator its own count of app_tick_fast (that clock there is the
@@ -138,7 +139,7 @@ static inline float ck_wrap(float x)     /* into 0 .. CK_BAR */
     return x;
 }
 static float ck_tick_frames(void) { return ck_follow ? cki.p * (1.0f / CK_T24_FRAME) : seq_sf * (1.0f / 6.0f); }
-static uint32_t pat_frames(void) { return (uint32_t)(ck_tick_frames() * 6.0f * (float)NSTEP); }
+static uint32_t pat_frames(void) { return (uint32_t)(ck_tick_frames() * 6.0f * (float)seq_len); }
 
 static void ck_tick_in(uint32_t s, int port)   /* a clock tick in, stamped s */
 {
@@ -181,7 +182,7 @@ static void ck_tick_in(uint32_t s, int port)   /* a clock tick in, stamped s */
     cki.last = s;
     if (cki.n < 255u)
         cki.n++;
-    cki.free_ = (cki.free_ + 1u) % 96u;
+    cki.free_ = (cki.free_ + 1u) % CK_BARU;
     if (cki.pend) {
         if (cki.pend == 1u)
             cki.song = 0;
@@ -192,7 +193,7 @@ static void ck_tick_in(uint32_t s, int port)   /* a clock tick in, stamped s */
         seq_play_req = 1;
         ck_ui |= 4u;
     } else if (cki.run) {
-        cki.song = (cki.song + 1u) % 96u;
+        cki.song = (cki.song + 1u) % CK_BARU;
     }
 }
 
@@ -209,12 +210,12 @@ static void ck_midi(uint32_t st, uint32_t d1, uint32_t d2, uint32_t stamp, int p
         cki.pend = 0;
         if (ck_follow && cki.run) {
             cki.run = 0;
-            cki.song = (cki.song + 1u) % 96u;        /* (the next tick's place, for a Continue) */
+            cki.song = (cki.song + 1u) % CK_BARU;    /* (the next tick's place, for a Continue) */
             seq_play_req = 0;
             ck_ui |= 8u;
         }
     } else if (st == 0xF2u && !cki.run) {            /* Song Position, in sixteenths: where a Continue starts */
-        cki.song = (d1 | d2 << 7) * 6u % 96u;
+        cki.song = (d1 | d2 << 7) * 6u % CK_BARU;
     }
 }
 

@@ -122,7 +122,7 @@ def main(out):
           "tap EDIT", "wait 40", "turn K1 50", "wait 40", "key 7 down 100", "wait 20", "expect v_ed 1", "expect v_ni >5500",
           "key 7 up", "wait 400", "turn K2 1", "wait 40", "wav my1_kick_reverse.wav", "key 7 down 100", "wait 20",
           "expect v_ed 3", "expect v_ni >9000", "expect v_ni <11025", "wait 100", "key 7 up", "wait 400", "wavstop", "expect peak_db_min -40",
-          "turn K2 -1", "turn K1 -50", "wait 40", "expect ed_start 0", "expect ed_rev 0", "tap EDIT", "wait 40", "expect page 0"]
+          "turn K2 -1", "turn K1 -50", "wait 40", "expect ed_start 0", "expect ed_rev 0", "tap EDIT", "wait 40", "tap EDIT", "wait 40", "expect page 0"]
     # 2: a kit of four hits into MY 2: onto track 8; each hit on its own key from C4
     hits = [tone(0.15, f, f * 0.6, 0.04) for f in (200.0, 420.0, 900.0, 1800.0)]
     kd, zones = [], []

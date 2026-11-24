@@ -1,0 +1,90 @@
+# STACK in the host simulator: the GLO page (BLUETOOTH), and the keys' notes out over Bluetooth.
+#   app/build/host/stack_host app/tests/glo.txt app/build/host
+master 4096
+wait 2200
+# GLO: its page and back
+tap GLO
+wait 40
+expect page 8
+tap GLO
+wait 40
+expect page 0
+tap GLO
+wait 40
+# Bluetooth is on at a start, waiting to be connected to
+expect bt_on 1
+expect bt 0
+shot glo_waiting.png
+# REC with nothing connected: nothing happens (and says so)
+tap REC
+wait 40
+expect bt_on 1
+# a tablet connects
+ble connect
+wait 100
+expect bt 1
+shot glo_connected.png
+# the keys' notes go out over Bluetooth (a note on and its off); over USB none, as before
+tap GLO
+wait 40
+key w4 down 100
+wait 50
+key w4 up
+wait 50
+expect bt_out 2
+expect notes_out 0
+# a note that comes in over USB is not passed on over Bluetooth
+midi USB 90 3C 64
+wait 30
+midi USB 80 3C 00
+wait 30
+expect bt_out 2
+wait 1200
+# DISCONNECT (REC on the GLO page): the link ends; Bluetooth stays on, and can be connected to again
+tap GLO
+wait 40
+tap REC
+wait 100
+expect bt 0
+expect bt_on 1
+shot glo_disconnected.png
+wait 1800
+ble connect
+wait 100
+expect bt 1
+# BLUETOOTH OFF: the link ends and none can be made
+turn K1 -1
+wait 100
+expect bt_on 0
+expect bt 0
+shot glo_off.png
+wait 200
+expect bt 0
+# with it off the keys still play, and nothing goes out
+tap GLO
+wait 40
+key w4 down 100
+wait 50
+expect voices 1
+key w4 up
+wait 50
+expect bt_out 2
+wait 1200
+# ON again
+tap GLO
+wait 40
+turn K1 1
+wait 100
+expect bt_on 1
+wait 1500
+ble connect
+wait 100
+expect bt 1
+# a restart: Bluetooth is on
+turn K1 -1
+wait 100
+expect bt_on 0
+reboot
+wait 2200
+expect bt_on 1
+expect lim_clips 0

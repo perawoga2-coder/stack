@@ -184,6 +184,7 @@ typedef struct {
     volatile uint8_t ed_rev;             /* REVERSE 0 off, 1 on */
     volatile uint8_t ed_loop;            /* LOOP: ED_LOOP_AUTO as the sound is, ED_LOOP_OFF, ED_LOOP_ON */
     volatile uint8_t ed_len;             /* LENGTH 1 .. 100: per cent of what is left from START (100: to the end) */
+    volatile uint8_t fit;                /* EDIT 2's FIT: 0 off, else the sound's length made FIT_BARS bars of the tempo */
     /* the ARP page: the track's keys played one after another while held. RATE 0 is off: the keys as they are */
     volatile uint8_t arp_r;              /* RATE: 0 off, else ARP_R_NAME */
     volatile uint8_t arp_m;              /* MODE: ARP_UP, ARP_DOWN, ARP_UPDOWN, ARP_ORDER */
@@ -232,6 +233,22 @@ static float lfo_wave(uint32_t shape, float p)   /* -1 .. 1 at p of a cycle (any
         return fm_sinf(6.2831853f * p);
     }
 }
+/* the pattern, for all the tracks: its steps (the time signature: SIG_*), how late the off-beat sixteenths come
+ * (SWING 50 straight .. 75), and the tempo while the FM-1 leads (seq_sf, clock.c). As they start: 4/4, 50, 120 */
+static volatile uint8_t seq_len = NSTEP;     /* steps in the pattern: 8, 12, 14 or 16 */
+static volatile uint8_t seq_sig = 2;         /* SIG_NAME's */
+static volatile uint8_t seq_swing = 50;
+static uint8_t bt_on = 1;                    /* GLO's BLUETOOTH: on at every start (nothing is saved yet) */
+static uint32_t bt_again;                    /* GLO's DISCONNECT: when it was turned off, to be turned on again (0: not) */
+#define NSIG 5u
+static const char *const SIG_NAME[NSIG] = {"2/4", "3/4", "4/4", "6/8", "7/8"};
+static const uint8_t SIG_LEN[NSIG] = {8, 12, 16, 12, 14};
+/* where a beat starts (the screen's grouping, the step keys' accents): in quarter notes; 6/8 in two dotted quarters;
+ * 7/8 as 2 + 2 + 3 eighths */
+static const uint16_t SIG_BEATS[NSIG] = {0x0011, 0x0111, 0x1111, 0x0041, 0x0111};
+#define NFIT 6u
+static const char *const FIT_NAME[NFIT] = {"OFF", "1/4 BAR", "1/2 BAR", "1 BAR", "2 BARS", "4 BARS"};
+static const float FIT_BARS[NFIT] = {0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f};
 static volatile uint8_t step_on[NTRK][NSTEP];
 static volatile uint8_t step_note[NTRK][NSTEP];   /* MIDI note; a drum plays its own pitch */
 
@@ -452,6 +469,7 @@ static float voice_fetch(voice_t *v)
     }
 }
 
+static float ck_tick_frames(void);           /* (clock.c: frames a clock tick, at the tempo now) */
 static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay, uint32_t seq, uint32_t life)
 {
     uint32_t li = trk[t].sound, i, k = 0, oldest = 0xFFFFFFFFu;
@@ -536,6 +554,15 @@ static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay,
             v->apred = (int16_t)v->pred;
             v->aidx = (uint8_t)v->idx;
         }
+    }
+    if (trk[t].fit && trk[t].fit < NFIT) {
+        /* FIT: the part that plays lasts so many bars of the tempo as it is now: its speed is set for that (the pitch
+         * goes with it, as a sampler's). Middle C plays it at that speed, the other keys and PITCH around it */
+        const float len = v->ed && !(v->ed & ED_BAKED) ? (float)(v->eb - v->ea) : (float)s->n;
+        v->inc = len / (FIT_BARS[trk[t].fit] * ck_tick_frames() * (float)seq_len * 6.0f) *
+                 semis((float)trk[t].pitch + (s->flags & SF_DRUM ? 0.0f : (float)((int32_t)note - 60)));
+        if (v->inc > INC_MAX)
+            v->inc = INC_MAX;
     }
     v->s0 = voice_fetch(v);
     v->s1 = voice_fetch(v);
@@ -667,9 +694,9 @@ static void seq_block_ext(uint32_t n, uint32_t tblock)
     if (placed) {                            /* the step it lands on, if it has only just begun, sounds now */
         uint32_t st = (uint32_t)(seq_xpos * (1.0f / 6.0f));
         if (seq_xpos - (float)st * 6.0f < 1.5f) {
-            if (!(st % NSTEP))
+            if (!(st % seq_len))
                 seq_bar_off = 0;
-            seq_fire(st % NSTEP, 0);
+            seq_fire(st % seq_len, 0);
         }
     }
     tgt = ck_wrap(raw - cki.base);
@@ -685,8 +712,23 @@ static void seq_block_ext(uint32_t n, uint32_t tblock)
     e *= 0.1f;
     adv += e > lim ? lim : e < -lim ? -lim : e;
     seq_dphase = adv * (1.0f / CK_BAR) / (float)n;
+    if (seq_swing > 50u) {                   /* SWING: the off-beat sixteenths come late, by so much of a step */
+        const float sh = 6.0f * ((float)seq_swing * 0.02f - 1.0f);
+        uint32_t k = (uint32_t)(seq_xpos * (1.0f / 6.0f)), kk;
+        for (kk = k; kk <= k + 1u; kk++) {
+            b = 6.0f * (float)kk + (kk & 1u ? sh : 0.0f);
+            if (b > seq_xpos && b <= seq_xpos + adv) {
+                uint32_t off = (uint32_t)((b - seq_xpos) / adv * (float)n), st = kk % seq_len;
+                if (off >= n)
+                    off = n - 1u;
+                if (!st)
+                    seq_bar_off = (int32_t)off;
+                seq_fire(st, off);
+            }
+        }
+    } else
     for (b = 6.0f * (float)((uint32_t)(seq_xpos * (1.0f / 6.0f)) + 1u); b <= seq_xpos + adv; b += 6.0f) {
-        uint32_t off = (uint32_t)((b - seq_xpos) / adv * (float)n), st = (uint32_t)(b * (1.0f / 6.0f) + 0.5f) % NSTEP;
+        uint32_t off = (uint32_t)((b - seq_xpos) / adv * (float)n), st = (uint32_t)(b * (1.0f / 6.0f) + 0.5f) % seq_len;
         if (off >= n)
             off = n - 1u;
         if (!st)
@@ -719,7 +761,7 @@ static void seq_block(uint32_t n)
         uint32_t nx = (uint32_t)(seq_xpos * (1.0f / 6.0f)) + 1u;
         seq_ext = 0;
         seq_sf = 6.0f * pf;
-        seq_next = nx % NSTEP;
+        seq_next = nx % seq_len;
         seq_left = ((float)nx * 6.0f - seq_xpos) * pf;
         ck_left = seq_left;
         while (ck_left >= pf)
@@ -743,16 +785,26 @@ static void seq_block(uint32_t n)
         ck_left += step_frames * (1.0f / 6.0f);
     }
     ck_left -= (float)n;
+    if (seq_next >= seq_len)                 /* (the pattern was made shorter under it) */
+        seq_next = 0;
+    if (seq_swing > 50u)                     /* (the place in the bar as the clock has it: straight) */
+        seq_phase = seq_running ? ck_wrap((float)seq_next * 6.0f + (seq_next & 1u ? 6.0f * ((float)seq_swing * 0.02f - 1.0f) : 0.0f) -
+                                          seq_left * 6.0f / step_frames) * (1.0f / CK_BAR) : 0.0f;
+    else
     seq_phase = seq_running ? ck_wrap((float)seq_next * 6.0f - seq_left * 6.0f / step_frames) * (1.0f / CK_BAR) : 0.0f;
-    seq_dphase = 1.0f / (step_frames * (float)NSTEP);
+    seq_dphase = 1.0f / (step_frames * (float)seq_len);
     if (!seq_running)
         return;
     while (seq_left < (float)n) {
         if (!seq_next)
             seq_bar_off = (int32_t)seq_left;
         seq_fire(seq_next, (uint32_t)seq_left);
-        seq_next = (seq_next + 1u) % NSTEP;
-        seq_left += step_frames;
+        /* SWING: an on-beat sixteenth is so much longer, the off-beat one after it so much shorter */
+        if (seq_swing > 50u)
+            seq_left += step_frames * (seq_next & 1u ? 2.0f - (float)seq_swing * 0.02f : (float)seq_swing * 0.02f);
+        else
+            seq_left += step_frames;
+        seq_next = (seq_next + 1u) % seq_len;
     }
     seq_left -= (float)n;
     }
@@ -828,13 +880,20 @@ static void arp_block(uint32_t n)
     }
     per = (float)ARP_R_TICKS[r] * ck_tick_frames();
     if (seq_running) {                           /* on the bar's grid: the next multiple of the step from here */
-        const float at = seq_phase * CK_BAR / (float)ARP_R_TICKS[r], dt = seq_dphase * CK_BAR / (float)ARP_R_TICKS[r];
-        const float to = (float)((uint32_t)at + 1u) - at;        /* steps of the ARP to its next one */
+        float at = seq_phase * CK_BAR / (float)ARP_R_TICKS[r], dt = seq_dphase * CK_BAR / (float)ARP_R_TICKS[r], to;
+        if (seq_swing > 50u && ARP_R_TICKS[r] == 6u) {           /* SWING, at 1/16: its off-beat steps late with the pattern's */
+            const float sh = (float)seq_swing * 0.02f - 1.0f, m2 = 2.0f * (float)((uint32_t)at / 2u), u = at - m2;
+            at = u < 1.0f + sh ? m2 + u / (1.0f + sh) : m2 + 1.0f + (u - 1.0f - sh) / (1.0f - sh);
+            dt /= u < 1.0f + sh ? 1.0f + sh : 1.0f - sh;
+        }
+        to = (float)((uint32_t)at + 1u) - at;                    /* steps of the ARP to its next one */
         left = at - (float)(uint32_t)at < 0.0005f && arp.since > per * 0.5f ? 0.0f : dt > 0.0f ? to / dt : 1e9f;
     } else {
+        if (seq_swing > 50u && ARP_R_TICKS[r] == 6u)             /* (stopped: long and short by turns) */
+            per *= arp.i & 1u ? (float)seq_swing * 0.02f : 2.0f - (float)seq_swing * 0.02f;
         left = per - arp.since;
     }
-    if (left < (float)n && arp.since + (left > 0.0f ? left : 0.0f) > per * 0.5f) {
+    if (left < (float)n && arp.since + (left > 0.0f ? left : 0.0f) > per * 0.4f) {
         uint8_t seq[ARP_KEYS];
         const uint32_t oct = t->arp_o >= 1u && t->arp_o <= 3u ? t->arp_o : 1u, m = t->arp_m, len = arp.n * oct;
         uint32_t a, b, cyc, pos, note, off = left > 0.0f ? (uint32_t)left : 0u;
@@ -1005,12 +1064,14 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         }
         if (lfo_on) {                            /* the LFO: where it is in this block, and what it moves */
             const uint32_t r = trk[t].lfo_r < NLFO_R ? trk[t].lfo_r : LFO_R_START;
-            lfo_dp = 1.0f / (LFO_R_STEPS[r] * ck_tick_frames() * 6.0f);
+            /* (4, 2, 1 BARS: of the pattern as the time signature has it; the note values are what they are) */
+            const float lsteps = r < 3u ? (float)(4u >> r) * (float)seq_len : LFO_R_STEPS[r];
+            lfo_dp = 1.0f / (lsteps * ck_tick_frames() * 6.0f);
             if (lfo_to == LFO_PITCH) {
                 if (lfo_trig >> t & 1u)
                     lfo_ph[t] = 0.0f;            /* a note: the vibrato from its start */
             } else if (seq_running) {            /* the pattern plays: on the bar */
-                const float at = ((float)(seq_bars & 3u) + seq_phase) * (float)NSTEP / LFO_R_STEPS[r];
+                const float at = ((float)(seq_bars & 3u) + seq_phase) * (float)seq_len / lsteps;
                 lfo_ph[t] = at - (float)(uint32_t)at;
             }
             lfo_p0 = lfo_ph[t];
@@ -1237,6 +1298,7 @@ static void defaults(void)
         trk[t].env_r = ENV_AUTO;
         trk[t].env_s = 100;
         trk[t].env_v = ENV_V_START;
+        trk[t].fit = 0;
         trk[t].ed_start = 0;
         trk[t].ed_rev = 0;
         trk[t].ed_loop = ED_LOOP_AUTO;
@@ -1268,6 +1330,11 @@ void app_init(void)
     lp.div = 2;
     lp.bars = 1;
     stack_mute = 0;                          /* a start always sounds */
+    seq_len = NSTEP;                         /* 4/4, straight */
+    seq_sig = 2;
+    seq_swing = 50;
+    bt_on = 1;
+    bt_again = 0;
     memset(&arp, 0, sizeof arp);
     memset(rev_of, -1, sizeof rev_of);
     memset(&cki, 0, sizeof cki);             /* and leads, at 120 */
@@ -1292,7 +1359,8 @@ void app_init(void)
 }
 
 /* --------------------------------------------------------------------- UI --- */
-enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV, PAGE_LFO, PAGE_EDIT, PAGE_ARP };
+enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV, PAGE_LFO, PAGE_EDIT, PAGE_ARP, PAGE_EDIT2, PAGE_GLO };
+#define PG4(p) ((p) == PAGE_EDIT ? 0u : (p) == PAGE_ARP ? 1u : (p) == PAGE_EDIT2 ? 2u : 3u)   /* page_words' pages */
 static struct {
     char msg[2][28];                     /* a short message over the header */
     uint32_t msg_until;
@@ -1583,6 +1651,47 @@ static void knob_turn(uint32_t k, int32_t e)
         ui.redraw = 1;
         return;
     }
+    if (ui.page == PAGE_EDIT2) {             /* EDIT 2: SWING, FIT, TIME SIG, TEMPO (FIT the track's; the rest all tracks') */
+        ui.hot = (int8_t)k;
+        ui.hot_t = plat_ms();
+        if (k == 0u) {
+            seq_swing = (uint8_t)clamp(seq_swing + e, 50, 75);
+        } else if (k == 1u) {
+            if (on_t8l())
+                app_say("T8L IS THE LOOP:", "NOTHING TO FIT");
+            else
+                t->fit = (uint8_t)clamp(t->fit + e, 0, (int32_t)NFIT - 1);
+        } else if (k == 2u) {
+            int32_t to = clamp(seq_sig + e, 0, (int32_t)NSIG - 1);
+            if (to != seq_sig) {
+                seq_sig = (uint8_t)to;
+                seq_len = SIG_LEN[to];
+                app_say("TIME SIG (ALL TRACKS):", SIG_NAME[to]);
+            }
+        } else if (ck_follow) {
+            app_say("TEMPO:", "THE CLOCK IN SETS IT");
+        } else {
+            int32_t bpm = clamp((int32_t)(44100.0f * 15.0f / seq_sf + 0.5f) + e, 40, 240);
+            seq_sf = 44100.0f * 60.0f / ((float)bpm * 4.0f);
+        }
+        ui.redraw = 1;
+        return;
+    }
+    if (ui.page == PAGE_GLO) {               /* GLO: KNOB 1 Bluetooth on or off */
+        if (k == 0u) {
+            uint32_t to = e > 0;
+            ui.hot = 0;
+            ui.hot_t = plat_ms();
+            if (to != bt_on) {
+                bt_on = (uint8_t)to;
+                bt_again = 0;
+                plat_ble_enable((int)to);
+                app_say("BLUETOOTH:", to ? "ON" : "OFF");
+            }
+        }
+        ui.redraw = 1;
+        return;
+    }
     if (ui.page == PAGE_ARP) {               /* the ARP page: RATE, MODE, OCTAVE, GATE */
         ui.hot = (int8_t)k;
         ui.hot_t = plat_ms();
@@ -1709,6 +1818,11 @@ static void input(void)
                 ;
             if (s == 16u)
                 continue;                    /* (the black keys have no job on the step page) */
+            if (s >= seq_len) {              /* a key past the pattern's end, as the time signature has it */
+                if (down)
+                    app_say("NO STEP THERE IN", SIG_NAME[seq_sig]);
+                continue;
+            }
             if (down && ui.held_step < 0) {
                 ui.held_step = (int8_t)s;
                 ui.held_turned = 0;
@@ -1734,11 +1848,15 @@ static void input(void)
             ui.note_of[k] = (uint8_t)note;
             ui.trk_of[k] = ui.sel;
             ev_put(QE_ON, ui.sel, (uint32_t)note, v ? v : 100u);
+            if (ck_ble)                      /* over Bluetooth the keys' notes go out (0.6.1); over USB none, as below */
+                plat_midi_send(0x09u | 0x90u << 8 | (uint32_t)note << 16 | (v ? v : 100u) << 24, TO_BLE);
             /* (the keys send no MIDI notes: up to 0.2.2-test they did, and the Burger Studio app plays its own drum
              * pads on any note that comes in, pad = note % 32, which came back through the FM-1's USB audio and
              * sounded like drums on some of the keys. Notes out return with a setting of their own) */
         } else if (up) {
             ev_put(QE_OFF, ui.trk_of[k], ui.note_of[k], 0);
+            if (ck_ble)
+                plat_midi_send(0x08u | 0x80u << 8 | (uint32_t)ui.note_of[k] << 16, TO_BLE);
         }
     }
 
@@ -1785,7 +1903,17 @@ static void input(void)
                                                  "PLAY", "REC", "OCT-", "OCT+"};
         if (!(pressed >> k & 1u) || k == B_OCTDN || k == B_OCTUP)
             continue;
-        if (k == B_REC) {
+        if (k == B_REC && ui.page == PAGE_GLO) {     /* GLO's REC: the Bluetooth link dropped (it may come back) */
+            if (!bt_on) {
+                app_say("BLUETOOTH IS OFF", "");
+            } else if (!plat_ble_linked()) {
+                app_say("BLUETOOTH:", "NOTHING CONNECTED");
+            } else {                         /* off, and on again in a moment: the link ends, the FM-1 can be found again */
+                plat_ble_enable(0);
+                bt_again = plat_ms() | 1u;
+                app_say("BLUETOOTH:", "DISCONNECTED");
+            }
+        } else if (k == B_REC) {
             sound_undo();
         } else if (k == B_PLAY) {
             seq_play_req = (uint8_t)!seq_play_req;
@@ -1795,18 +1923,23 @@ static void input(void)
                 app_say(seq_play_req ? "PLAY" : "STOP", "");
         } else if (k == B_SEQ && on_t8l()) {     /* the looper's track has no steps */
             say_t8l();
-        } else if (k == B_SEQ || k == B_FX || k == B_ENV || k == B_LFO || k == B_EDIT || k == B_ARP) {
-            /* SEQ: the steps and back; FX, ENV, LFO, EDIT, ARP: their pages and back */
+        } else if (k == B_SEQ || k == B_FX || k == B_ENV || k == B_LFO || k == B_EDIT || k == B_ARP || k == B_GLO) {
+            /* SEQ: the steps and back; FX, ENV, LFO, ARP, GLO: their pages and back; EDIT: its page 1, its page 2, back */
             uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : k == B_ENV ? PAGE_ENV : k == B_LFO ? PAGE_LFO :
-                          k == B_EDIT ? PAGE_EDIT : PAGE_ARP;
+                          k == B_EDIT ? PAGE_EDIT : k == B_ARP ? PAGE_ARP : PAGE_GLO;
+            if (k == B_EDIT && ui.page == PAGE_EDIT)
+                ui.page = PAGE_EDIT2;
+            else if (k == B_EDIT && ui.page == PAGE_EDIT2)
+                ui.page = PAGE_PLAY;
+            else
             ui.page = (uint8_t)(ui.page == to ? PAGE_PLAY : to);
             ui.held_step = -1;
             for (e = 0; e < (int32_t)NKEYS; e++)        /* keys held across the change let go */
                 if (ui.keys >> e & 1u)
                     ev_put(QE_OFF, ui.trk_of[e], ui.note_of[e], 0);
             app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : ui.page == PAGE_ENV ? "ENV PAGE" :
-                    ui.page == PAGE_LFO ? "LFO PAGE" : ui.page == PAGE_EDIT ? "EDIT PAGE" : ui.page == PAGE_ARP ? "ARP PAGE" :
-                    "TRACKS PAGE", "");
+                    ui.page == PAGE_LFO ? "LFO PAGE" : ui.page == PAGE_EDIT ? "EDIT PAGE 1" : ui.page == PAGE_ARP ? "ARP PAGE" :
+                    ui.page == PAGE_EDIT2 ? "EDIT PAGE 2" : ui.page == PAGE_GLO ? "GLO PAGE" : "TRACKS PAGE", "");
             if (ui.page == PAGE_EDIT && on_t8l())
                 app_say("T8L IS THE LOOP:", "NOTHING TO EDIT");
         } else {
@@ -1847,9 +1980,9 @@ static void input(void)
                * can be taken off */
               (ui.loop_mode && (lp.state == LP_REC || (lp.state == LP_ARMED && (plat_ms() >> 7 & 1u))) ? 1u << B_OCTUP : 0u) |
               (ui.loop_mode && lp.undo ? 1u << B_OCTDN : 0u) |
-              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
+              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT || ui.page == PAGE_EDIT2 ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (ui.page == PAGE_GLO ? 1u << B_GLO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
-        for (k = 0; k < 16u; k++)
+        for (k = 0; k < seq_len; k++)
             if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
                 lit_keys |= 1u << WK[k];
     } else {
@@ -1885,6 +2018,20 @@ static void page_words(uint32_t pg, char w[4][28], int32_t *pos)
         p4[1] = t->ed_rev * 226;
         p4[2] = t->ed_loop * 113;
         p4[3] = (t->ed_len - 1) * 226 / 99;
+    } else if (pg == 2u) {
+        int_text(seq_swing, w[0]);
+        text_cat(w[0], "%");
+        text_cat(w[1], FIT_NAME[t->fit < NFIT ? t->fit : 0u]);
+        text_cat(w[2], SIG_NAME[seq_sig < NSIG ? seq_sig : 2u]);
+        int_text((int32_t)(44100.0f * 15.0f / (ck_tick_frames() * 6.0f) + 0.5f), w[3]);
+        p4[0] = (seq_swing - 50) * 226 / 25;
+        p4[1] = t->fit * 226 / ((int32_t)NFIT - 1);
+        p4[2] = seq_sig * 226 / ((int32_t)NSIG - 1);
+        p4[3] = clamp((int32_t)(44100.0f * 15.0f / (ck_tick_frames() * 6.0f) + 0.5f) - 40, 0, 200) * 226 / 200;
+    } else if (pg == 3u) {
+        text_cat(w[0], bt_on ? "ON" : "OFF");
+        p4[0] = bt_on ? 226 : 0;
+        p4[1] = p4[2] = p4[3] = 0;
     } else {
         text_cat(w[0], ARP_R_NAME[t->arp_r < NARP_R ? t->arp_r : 0u]);
         text_cat(w[1], ARP_M_NAME[t->arp_m < NARP_M ? t->arp_m : 0u]);
@@ -1950,7 +2097,7 @@ static void draw_header(void)
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
-        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : ui.page == PAGE_LFO ? "LFO" : ui.page == PAGE_EDIT ? "EDIT" : ui.page == PAGE_ARP ? "ARP" : "TRACKS",
+        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : ui.page == PAGE_LFO ? "LFO" : ui.page == PAGE_EDIT ? "EDIT 1" : ui.page == PAGE_ARP ? "ARP" : ui.page == PAGE_EDIT2 ? "EDIT 2" : ui.page == PAGE_GLO ? "GLO" : "TRACKS",
                 C_GRAY);
         t[0] = 0;
         text_cat(t, "OCT ");
@@ -2041,14 +2188,22 @@ static void draw_steps(void)                 /* the step page: the selected trac
     cv_text(6, 4, &FONT_B, n, C_ORANGE);
     list_name(trk[ui.sel].sound, t);
     cv_text(40, 4, &FONT_B, t, s ? C_WHITE : C_DIM);
-    cv_text(6, 28, &FONT_XS, s ? "WHITE KEYS 1-16: STEP ON / OFF" : "EMPTY TRACK: PICK A SOUND FIRST", C_GRAY);
+    t[0] = 0;                                /* (the pattern's steps, as the time signature has them) */
+    text_cat(t, SIG_NAME[seq_sig]);
+    text_cat(t, ": WHITE KEYS 1-");
+    int_text(seq_len, n);
+    text_cat(t, n);
+    text_cat(t, ", STEP ON / OFF");
+    cv_text(6, 28, &FONT_XS, s ? t : "EMPTY TRACK: PICK A SOUND FIRST", C_GRAY);
     cv_text(6, 46, &FONT_XS, drum ? "A DRUM PLAYS ITS OWN PITCH" : "HOLD A STEP + KNOB 1: ITS NOTE", C_GRAY);
     cv_blit(0, 28);
     cv_begin(240, 80, C_BLACK);
-    for (i = 0; i < NSTEP; i++) {
+    for (i = 0; i < seq_len; i++) {
         int32_t x = 4 + (int32_t)(i % 8u) * 29, y = 2 + (int32_t)(i / 8u) * 38;
         uint32_t on = step_on[ui.sel][i], now = seq_play_req && seq_step_now == i, held = ui.held_step == (int8_t)i;
         uint16_t c = on ? C_ORANGE : C_LINE;
+        if (SIG_BEATS[seq_sig] >> i & 1u)        /* a beat starts here: a mark under the step */
+            cv_rect(x, y + 35, 27, 2, C_WHITE);
         cv_rect(x, y, 27, 34, held ? C_WHITE : now ? C_HI : c);
         if (!on || held || now)
             cv_rect(x + 2, y + 2, 23, 30, on ? C_ORANGE : C_BLACK);
@@ -2070,9 +2225,12 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     char v[12];
     cv_begin(240, 52, C_BLACK);
     cv_rect(0, 0, 240, 1, C_LINE);
-    if (ui.page == PAGE_EDIT || ui.page == PAGE_ARP) {   /* the EDIT and ARP pages: their four knobs and their values */
-        static const char *const N4[2][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"}};
-        const uint32_t pg = ui.page == PAGE_ARP;
+    if (ui.page >= PAGE_EDIT) {              /* the EDIT, ARP and GLO pages: their four knobs and their values */
+        static const char *const N4[4][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
+                                             {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "", "", ""}};
+        static const char *const BACK[4] = {"EDIT: PAGE 2", "ARP: BACK TO THE TRACKS", "EDIT: BACK TO THE TRACKS",
+                                            "GLO: BACK   REC: DISCONNECT"};
+        const uint32_t pg = PG4(ui.page);
         char w4[4][28];
         page_words(pg, w4, 0);
         for (k = 0; k < 4u; k++) {
@@ -2081,7 +2239,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             cv_text(x, 3, &FONT_T, N4[pg][k], hot ? C_WHITE : C_GRAY);
             cv_text(x, 16, &FONT_XS, w4[k], hot ? C_WHITE : C_HI);
         }
-        cv_text(4, 40, &FONT_T, pg ? "ARP: BACK TO THE TRACKS" : "EDIT: BACK TO THE TRACKS", C_DIM);
+        cv_text(4, 40, &FONT_T, BACK[pg], C_DIM);
         cv_blit(0, 188);
         return;
     }
@@ -2312,7 +2470,8 @@ static void draw_lfo(void)
  * words and a line that shows where the knob stands */
 static void draw_page4(uint32_t pg)
 {
-    static const char *const NAME[2][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"}};
+    static const char *const NAME[4][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
+                                           {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "STATUS", "DISCONNECT", ""}};
     const track_t *tr = &trk[ui.sel];
     const sound_t *snd = list_sound(tr->sound);
     const uint32_t t8 = !pg && on_t8l();
@@ -2329,46 +2488,99 @@ static void draw_page4(uint32_t pg)
             text_cat(w[2], snd && (snd->flags & SF_LOOP) ? ": ITS OWN LOOP" : ": START TO LENGTH");
         if (tr->ed_len == 100u)
             text_cat(w[3], " TO ITS END");
-    } else if (!tr->arp_r) {
+    } else if (pg == 1u && !tr->arp_r) {
         w[0][0] = 0;
         text_cat(w[0], "OFF: THE KEYS AS THEY ARE");
+    } else if (pg == 2u) {                   /* (which are the track's and which are everyone's) */
+        text_cat(w[0], seq_swing == 50u ? " STRAIGHT (ALL TRACKS)" : " (ALL TRACKS)");
+        if (on_t8l()) {
+            w[1][0] = 0;
+            text_cat(w[1], "T8L: NOTHING TO FIT");
+        } else if (tr->fit) {
+            text_cat(w[1], " (THIS TRACK)");
+        } else {
+            text_cat(w[1], ": AS THE SOUND IS");
+        }
+        text_cat(w[2], " (ALL TRACKS)");
+        text_cat(w[3], ck_follow ? " FROM THE CLOCK IN" : " BPM (ALL TRACKS)");
+    } else if (pg == 3u) {
+        text_cat(w[1], !bt_on ? "OFF" : plat_ble_connected() ? "CONNECTED" : plat_ble_linked() ? "CONNECTING" : "WAITING");
+        text_cat(w[2], "PRESS REC");
     }
     for (q = 0; q < 4u; q++) {
         int32_t y = q < 2u ? 22 + (int32_t)q * 29 : 2 + (int32_t)(q - 2u) * 29;
-        uint32_t off = t8 || (pg && q != 0u && !tr->arp_r);      /* (the ARP off: the rest waits) */
+        uint32_t off = t8 || (pg == 1u && q != 0u && !tr->arp_r) ||     /* (the ARP off: the rest waits) */
+                       (pg == 2u && q == 3u && ck_follow) || (pg == 3u && q == 2u && !plat_ble_linked());
         int hot = ui.hot == (int8_t)q && plat_ms() - ui.hot_t < 900u;
         if (!(q & 1u)) {
             cv_begin(240, 80, C_BLACK);
             if (!q) {                            /* whose page this is */
                 trk_text(ui.sel, n);
-                cv_text(6, 2, &FONT_B, n, C_ORANGE);
                 t[0] = 0;
-                if (t8)
+                if (pg == 3u)
+                    text_cat(t, "THE WHOLE FM-1");
+                else if (t8)
                     text_cat(t, "THE LOOP: NOTHING TO EDIT");
                 else
                     list_name(tr->sound, t);
+                if (pg == 3u)
+                    cv_text(6, 2, &FONT_B, "GLO", C_ORANGE);
+                else
+                    cv_text(6, 2, &FONT_B, n, C_ORANGE);
                 cv_text(40, 2, &FONT_S, t, C_WHITE);
             }
         }
         cv_text(6, y, &FONT_B, NAME[pg][q], hot ? C_ORANGE : off ? C_GRAY : C_WHITE);
         cv_text(234 - text_w(&FONT_XS, w[q]), y + 1, &FONT_XS, w[q], off ? C_GRAY : C_HI);
-        cv_rect(6, y + 20, 228, 1, C_DIM);       /* the knob's line */
-        cv_rect(6, y + 19, pos[q], 3, off ? C_GRAY : C_ORANGE);
-        cv_rect(6 + (pos[q] ? pos[q] - 1 : 0), y + 16, 3, 9, off ? C_GRAY : C_WHITE);
+        if (pg != 3u || !q) {
+            cv_rect(6, y + 20, 228, 1, C_DIM);   /* the knob's line */
+            cv_rect(6, y + 19, pos[q], 3, off ? C_GRAY : C_ORANGE);
+            cv_rect(6 + (pos[q] ? pos[q] - 1 : 0), y + 16, 3, 9, off ? C_GRAY : C_WHITE);
+        }
         if (q & 1u)
             cv_blit(0, 28 + (q >> 1) * 80u);
     }
 }
 
 #define TITLE_MS 2000u                   /* the title after a start: the name and the version, large */
+/* the cover: record crates stacked any old how, one on another, drawn from a few rectangles each (no picture is
+ * stored): a crate is its two side posts, three slats with a hand hole in the middle one, and the records in it, their
+ * spines of several colours and heights showing over its top. y0: the band's top in the picture (240 x 160) */
+static void cover_band(int32_t y0)
+{
+    static const struct { uint8_t x, y, w; } CRATE[5] = {{10, 126, 96}, {26, 96, 84}, {4, 66, 92}, {30, 36, 80}, {16, 6, 88}};
+    static const uint16_t SPINE[6] = {C_ORANGE, C_WHITE, RGB(64, 176, 164), RGB(214, 70, 70), RGB(236, 196, 72), RGB(120, 130, 210)};
+    const uint16_t wood = RGB(168, 118, 66), dark = RGB(98, 66, 36);
+    uint32_t c, i;
+    for (c = 0; c < 5u; c++) {
+        const int32_t x = CRATE[c].x, y = (int32_t)CRATE[c].y - y0, w = CRATE[c].w;
+        if (y > 80 || y + 30 < 0)
+            continue;
+        cv_rect(x + 3, y + 2, w - 6, 26, C_BLACK);                       /* the crate's inside */
+        for (i = 0; (int32_t)(4u + i * 3u) < w - 6; i++) {               /* the records: a spine every 3 px */
+            const uint32_t h = (i * 7u + c * 5u) % 9u, col = (i * 5u + c * 3u + (i >> 2)) % 6u;
+            cv_rect(x + 4 + (int32_t)i * 3, y - 3 + (int32_t)(h > 5u ? 8u - h : h), 2, 9, SPINE[col]);
+        }
+        for (i = 0; i < 3u; i++)                                         /* three slats */
+            cv_rect(x, y + 5 + (int32_t)i * 8, w, 6, i == 1u ? dark : wood);
+        cv_rect(x + w / 2 - 9, y + 14, 18, 4, C_BLACK);                  /* the hand hole */
+        cv_rect(x, y + 2, 4, 26, wood);                                  /* the posts */
+        cv_rect(x + w - 4, y + 2, 4, 26, wood);
+        cv_rect(x + 1, y + 28, w - 2, 1, dark);
+    }
+}
+
 static void draw_title(void)                 /* in the tracks' place; the keys, the knobs and the header work meanwhile */
 {
+    const felucca_font_t *big = text_w(&FONT_L, APP_NAME) <= 122 ? &FONT_L : &FONT_M;
     cv_begin(240, 80, C_BLACK);
-    cv_text((240 - text_w(&FONT_L, APP_NAME)) / 2, 40, &FONT_L, APP_NAME, C_ORANGE);
+    cover_band(0);
+    cv_text(116 + (124 - text_w(big, APP_NAME)) / 2, 40, big, APP_NAME, C_ORANGE);
     cv_blit(0, 28);
     cv_begin(240, 80, C_BLACK);
-    cv_text((240 - text_w(&FONT_M, APP_VERSION)) / 2, 8, &FONT_M, APP_VERSION, C_WHITE);
-    cv_text((240 - text_w(&FONT_XS, "MAKER HIP")) / 2, 44, &FONT_XS, "MAKER HIP", C_GRAY);
+    cover_band(80);
+    cv_text(116 + (124 - text_w(&FONT_M, APP_VERSION)) / 2, 8, &FONT_M, APP_VERSION, C_WHITE);
+    cv_text(116 + (124 - text_w(&FONT_XS, "MAKER HIP")) / 2, 44, &FONT_XS, "MAKER HIP", C_GRAY);
     cv_blit(0, 108);
 }
 
@@ -2383,8 +2595,8 @@ static void draw(void)
         draw_env();
     else if (ui.page == PAGE_LFO)
         draw_lfo();
-    else if (ui.page == PAGE_EDIT || ui.page == PAGE_ARP)
-        draw_page4(ui.page == PAGE_ARP);
+    else if (ui.page >= PAGE_EDIT)
+        draw_page4(PG4(ui.page));
     else if (ui.page == PAGE_STEP)
         draw_steps();
     else
@@ -2499,6 +2711,11 @@ void app_frame(void)
     my_frame();
     if (mute_frame())
         ui.redraw = 1;
+    if (bt_again && now - bt_again >= 400u) {    /* DISCONNECT: Bluetooth on again, to be found and connected to */
+        bt_again = 0;
+        if (bt_on)
+            plat_ble_enable(1);
+    }
     {
         const uint8_t bt = (uint8_t)(plat_ble_connected() != 0);
         if (bt != ck_ble) {                  /* a Bluetooth link came or went: the header says, the clock out follows */
@@ -2708,6 +2925,16 @@ int app_expect(const char *what, int *got)
         if (k < NVOICE)
             *got = what[2] == 'n' ? (int)voice[k].ni : (int)voice[k].ed;
     }
+    else if (!strcmp(what, "swing"))         /* EDIT 2: SWING, the selected track's FIT, the time signature, the pattern's steps, the tempo */
+        *got = seq_swing;
+    else if (!strcmp(what, "fit"))
+        *got = trk[ui.sel].fit;
+    else if (!strcmp(what, "sig"))
+        *got = seq_sig;
+    else if (!strcmp(what, "seq_len"))
+        *got = seq_len;
+    else if (!strcmp(what, "bt_on"))         /* GLO's BLUETOOTH */
+        *got = bt_on;
     else if (!strcmp(what, "ed_start"))      /* the selected track's EDIT page: START, REVERSE, LOOP (0 AUTO, 1 OFF, 2 ON), LENGTH */
         *got = trk[ui.sel].ed_start;
     else if (!strcmp(what, "ed_rev"))
