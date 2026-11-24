@@ -492,69 +492,6 @@ key w4 down 100
 wait 450
 key w4 up
 wait 350
-turn PRESET 1
-wait 30
-expect sound 70
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 71
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 72
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 73
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 74
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 75
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 76
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 77
-key w4 down 100
-wait 450
-key w4 up
-wait 350
-turn PRESET 1
-wait 30
-expect sound 78
-key w4 down 100
-wait 450
-key w4 up
-wait 350
 wavstop
 expect lim_clips 0
 shot last_sound.png

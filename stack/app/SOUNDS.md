@@ -4,7 +4,7 @@ Made by `tools/make_sounds.py` from `tools/sounds.json`. Every sound is audio on
 another firmware is in STACK. From Felucca only rendered audio is used, with credit: Felucca by Leo Kuroshita
 (Hügelton Instruments).
 
-78 sounds, 400.5 KiB: DRUMS 24, BASS 10, KEYS 15, PAD 10, LEAD 13, FX 6.
+69 sounds, 353.7 KiB: DRUMS 22, BASS 10, KEYS 15, PAD 7, LEAD 10, FX 5.
 Stored as IMA ADPCM (4 bits a sample) or, the single cycles, 16-bit PCM; mono. Every sound is brought to the same
 loudness (ITU-R BS.1770 K-weighting, the loudest 100 ms at -15.5 dB) with its own peak at -1.0 dBFS at most.
 
@@ -29,65 +29,56 @@ loudness (ITU-R BS.1770 K-weighting, the loudest 100 ms at -15.5 dB) with its ow
 | 17 | DRUMS | KICK DEEP | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Deep Kit Kick.flac` | 22050 Hz | 0.45 s |
 | 18 | DRUMS | SNARE DEEP | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Deep Kit Snare.flac` | 22050 Hz | 0.35 s |
 | 19 | DRUMS | KICK STUDIO | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Studio Kit Kick.flac` | 22050 Hz | 0.35 s |
-| 20 | DRUMS | SNARE STUDIO | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Studio Kit Snare.flac` | 22050 Hz | 0.35 s |
-| 21 | DRUMS | CLAP STUDIO | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Studio Kit Clap.flac` | 22050 Hz | 0.30 s |
-| 22 | DRUMS | HAT TIGHT | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Tight Kit Hat Closed.flac` | 22050 Hz | 0.12 s |
-| 23 | DRUMS | BELL PERC | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Perc Kit Bell.flac` | 22050 Hz | 0.45 s |
-| 24 | DRUMS | HAND DRUM | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Hand Drum C4.flac` | 22050 Hz | 0.40 s |
-| 25 | BASS | SUB BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Sub Bass C3.flac` | 22050 Hz | 0.43 s |
-| 26 | BASS | SQR BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Sqr Bass C3.flac` | 22050 Hz | 0.34 s |
-| 27 | BASS | FAT BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Fat Bass C3.flac` | 22050 Hz | 0.34 s |
-| 28 | BASS | WAVE BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wave Bass C3.flac` | 22050 Hz | 0.41 s |
-| 29 | BASS | WOW BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wow Bass C3.flac` | 22050 Hz | 0.65 s |
-| 30 | BASS | FM BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Fm Bass C3.flac` | 22050 Hz | 0.34 s |
-| 31 | BASS | ACID | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Acid C4.flac` | 22050 Hz | 0.44 s |
-| 32 | BASS | PUNCH BASS | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Bass Punch C2.wav` | 22050 Hz | 0.50 s |
-| 33 | BASS | SLAP BASS | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Slap Bass C2.wav` | 22050 Hz | 0.50 s |
-| 34 | BASS | GROWL BASS | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Growl Bass C2.wav` | 22050 Hz | 0.50 s |
-| 35 | KEYS | PIANO | Versilian Studios VCSL by Sam Gossner | CC0 1.0 | `PIANO/03_GPiano_sus_C4_v2_rr1_Player.wav` | 22050 Hz | 1.00 s |
-| 36 | KEYS | TINE EP | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Tine Ep C4.flac` | 22050 Hz | 0.90 s |
-| 37 | KEYS | SOFT EP | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM E.Piano Soft C4.wav` | 22050 Hz | 0.50 s |
-| 38 | KEYS | CLAV | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Clav C4.wav` | 22050 Hz | 0.45 s |
-| 39 | KEYS | ORGAN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Organ C4.flac` | 22050 Hz | 0.40 s |
-| 40 | KEYS | FULL ORGAN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Full Organ C4.flac` | 22050 Hz | 0.34 s |
-| 41 | KEYS | MARIMBA | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Marimba C4.flac` | 22050 Hz | 0.50 s |
-| 42 | KEYS | KALIMBA | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Kalimba C4.flac` | 22050 Hz | 0.60 s |
-| 43 | KEYS | VIBES | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Vibes C5.wav` | 22050 Hz | 0.50 s |
-| 44 | KEYS | HARP | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Harp C4.flac` | 22050 Hz | 0.80 s |
-| 45 | KEYS | BELL | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Bell C4.flac` | 22050 Hz | 0.80 s |
-| 46 | KEYS | FM BELL | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `FM6 Bell C4.flac` | 22050 Hz | 0.80 s |
-| 47 | KEYS | PLUCK | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pluck C4.flac` | 22050 Hz | 0.60 s |
-| 48 | KEYS | PLUCK HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `P PLUCK C3.wav` | 22050 Hz | 0.80 s |
-| 49 | KEYS | MUSIC BOX | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Music Box G5.wav` | 22050 Hz | 0.50 s |
-| 50 | PAD | SOFT PAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Soft Pad C4.flac` | 11025 Hz | 1.32 s |
-| 51 | PAD | STRINGS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Strings C4.flac` | 11025 Hz | 1.15 s |
-| 52 | PAD | PWM STRINGS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pwm Str C4.flac` | 11025 Hz | 1.43 s |
-| 53 | PAD | CHOIR | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Choir Aah C4.flac` | 11025 Hz | 1.15 s |
-| 54 | PAD | CLOUD PAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Cloud Pad C4.flac` | 11025 Hz | 1.49 s |
-| 55 | PAD | SHIMMER | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Shimmer C4.flac` | 11025 Hz | 1.20 s |
-| 56 | PAD | FM PAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pad C4.flac` | 11025 Hz | 1.51 s |
-| 57 | PAD | DRONE | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Drone String C4.flac` | 11025 Hz | 1.33 s |
-| 58 | PAD | VOX HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W VOX.wav` | 32000 Hz | 0.01 s |
-| 59 | PAD | GLASS HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W GLASS.wav` | 32000 Hz | 0.01 s |
-| 60 | LEAD | SAW LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Saw Lead C4.flac` | 22050 Hz | 0.44 s |
-| 61 | LEAD | PULSE LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pulse Ld C4.flac` | 22050 Hz | 0.41 s |
-| 62 | LEAD | WAVE LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wave Lead C4.flac` | 22050 Hz | 0.41 s |
-| 63 | LEAD | SYNC LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Sync Lead C4.flac` | 22050 Hz | 0.43 s |
-| 64 | LEAD | VOX LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Vox Lead C4.flac` | 22050 Hz | 0.46 s |
-| 65 | LEAD | BRASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Brass C4.flac` | 22050 Hz | 0.34 s |
-| 66 | LEAD | RAVE | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Rave C4.flac` | 22050 Hz | 0.44 s |
-| 67 | LEAD | CHIP | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Arp 8BIT C4.flac` | 22050 Hz | 0.34 s |
-| 68 | LEAD | FLUTE | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Soft Flute C4.flac` | 22050 Hz | 0.34 s |
-| 69 | LEAD | ROCK ORGAN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Rock Drive C4.flac` | 22050 Hz | 0.45 s |
-| 70 | LEAD | BRASS HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W BRASS.wav` | 32000 Hz | 0.01 s |
-| 71 | LEAD | REED HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W REED.wav` | 32000 Hz | 0.01 s |
-| 72 | LEAD | ORGAN HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W ORGAN.wav` | 32000 Hz | 0.01 s |
-| 73 | FX | WIND | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wind.flac` | 11025 Hz | 1.60 s |
-| 74 | FX | RAIN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Rain.flac` | 22050 Hz | 1.20 s |
-| 75 | FX | ARCADE | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Arcade.flac` | 22050 Hz | 0.90 s |
-| 76 | FX | METAL | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Metal.flac` | 22050 Hz | 0.70 s |
-| 77 | FX | GLITCH | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Glitch C4.flac` | 22050 Hz | 0.80 s |
-| 78 | FX | SPACE FX | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Space FX C4.wav` | 22050 Hz | 0.50 s |
+| 20 | DRUMS | CLAP STUDIO | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Studio Kit Clap.flac` | 22050 Hz | 0.30 s |
+| 21 | DRUMS | BELL PERC | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Perc Kit Bell.flac` | 22050 Hz | 0.45 s |
+| 22 | DRUMS | HAND DRUM | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Hand Drum C4.flac` | 22050 Hz | 0.40 s |
+| 23 | BASS | SUB BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Sub Bass C3.flac` | 22050 Hz | 0.43 s |
+| 24 | BASS | SQR BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Sqr Bass C3.flac` | 22050 Hz | 0.34 s |
+| 25 | BASS | FAT BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Fat Bass C3.flac` | 22050 Hz | 0.34 s |
+| 26 | BASS | WAVE BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wave Bass C3.flac` | 22050 Hz | 0.41 s |
+| 27 | BASS | WOW BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wow Bass C3.flac` | 22050 Hz | 0.65 s |
+| 28 | BASS | FM BASS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Fm Bass C3.flac` | 22050 Hz | 0.34 s |
+| 29 | BASS | ACID | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Acid C4.flac` | 22050 Hz | 0.44 s |
+| 30 | BASS | PUNCH BASS | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Bass Punch C2.wav` | 22050 Hz | 0.50 s |
+| 31 | BASS | SLAP BASS | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Slap Bass C2.wav` | 22050 Hz | 0.50 s |
+| 32 | BASS | GROWL BASS | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Growl Bass C2.wav` | 22050 Hz | 0.50 s |
+| 33 | KEYS | PIANO | Versilian Studios VCSL by Sam Gossner | CC0 1.0 | `PIANO/03_GPiano_sus_C4_v2_rr1_Player.wav` | 22050 Hz | 1.00 s |
+| 34 | KEYS | TINE EP | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Tine Ep C4.flac` | 22050 Hz | 0.90 s |
+| 35 | KEYS | SOFT EP | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM E.Piano Soft C4.wav` | 22050 Hz | 0.50 s |
+| 36 | KEYS | CLAV | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Clav C4.wav` | 22050 Hz | 0.45 s |
+| 37 | KEYS | ORGAN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Organ C4.flac` | 22050 Hz | 0.40 s |
+| 38 | KEYS | FULL ORGAN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Full Organ C4.flac` | 22050 Hz | 0.34 s |
+| 39 | KEYS | MARIMBA | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Marimba C4.flac` | 22050 Hz | 0.50 s |
+| 40 | KEYS | KALIMBA | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Kalimba C4.flac` | 22050 Hz | 0.60 s |
+| 41 | KEYS | VIBES | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Vibes C5.wav` | 22050 Hz | 0.50 s |
+| 42 | KEYS | HARP | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Harp C4.flac` | 22050 Hz | 0.80 s |
+| 43 | KEYS | BELL | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Bell C4.flac` | 22050 Hz | 0.80 s |
+| 44 | KEYS | FM BELL | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `FM6 Bell C4.flac` | 22050 Hz | 0.80 s |
+| 45 | KEYS | PLUCK | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pluck C4.flac` | 22050 Hz | 0.60 s |
+| 46 | KEYS | PLUCK HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `P PLUCK C3.wav` | 22050 Hz | 0.80 s |
+| 47 | KEYS | MUSIC BOX | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Music Box G5.wav` | 22050 Hz | 0.50 s |
+| 48 | PAD | STRINGS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Strings C4.flac` | 11025 Hz | 1.15 s |
+| 49 | PAD | PWM STRINGS | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pwm Str C4.flac` | 11025 Hz | 1.43 s |
+| 50 | PAD | CHOIR | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Choir Aah C4.flac` | 11025 Hz | 1.15 s |
+| 51 | PAD | SHIMMER | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Shimmer C4.flac` | 11025 Hz | 1.20 s |
+| 52 | PAD | FM PAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pad C4.flac` | 11025 Hz | 1.51 s |
+| 53 | PAD | VOX HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W VOX.wav` | 32000 Hz | 0.01 s |
+| 54 | PAD | GLASS HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W GLASS.wav` | 32000 Hz | 0.01 s |
+| 55 | LEAD | SAW LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Saw Lead C4.flac` | 22050 Hz | 0.44 s |
+| 56 | LEAD | PULSE LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Pulse Ld C4.flac` | 22050 Hz | 0.41 s |
+| 57 | LEAD | WAVE LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wave Lead C4.flac` | 22050 Hz | 0.41 s |
+| 58 | LEAD | VOX LEAD | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Vox Lead C4.flac` | 22050 Hz | 0.46 s |
+| 59 | LEAD | RAVE | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Rave C4.flac` | 22050 Hz | 0.44 s |
+| 60 | LEAD | FLUTE | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Soft Flute C4.flac` | 22050 Hz | 0.34 s |
+| 61 | LEAD | ROCK ORGAN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Rock Drive C4.flac` | 22050 Hz | 0.45 s |
+| 62 | LEAD | BRASS HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W BRASS.wav` | 32000 Hz | 0.01 s |
+| 63 | LEAD | REED HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W REED.wav` | 32000 Hz | 0.01 s |
+| 64 | LEAD | ORGAN HG | The Hügelton Sample Pack by Leo Kuroshita (Hügelton Instruments) | CC0 1.0 | `W ORGAN.wav` | 32000 Hz | 0.01 s |
+| 65 | FX | WIND | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Wind.flac` | 11025 Hz | 1.60 s |
+| 66 | FX | RAIN | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Rain.flac` | 22050 Hz | 1.20 s |
+| 67 | FX | ARCADE | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Arcade.flac` | 22050 Hz | 0.90 s |
+| 68 | FX | GLITCH | Audio rendered by Maker Hip from Felucca's presets (the Burger Studio app's Maker Bank) | rendered audio, with credit to Felucca by Leo Kuroshita (Hügelton Instruments) | `Glitch C4.flac` | 22050 Hz | 0.80 s |
+| 69 | FX | SPACE FX | Maker Hip's own FM bank (the Burger Studio app's MakerHip FM sounds) | Maker Hip's own | `FM Space FX C4.wav` | 22050 Hz | 0.50 s |
 
 Sources:
 

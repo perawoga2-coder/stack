@@ -5,7 +5,7 @@ wait 2200
 turn ALGO 4
 wait 30
 expect track 5
-expect sound 35
+expect sound 33
 # FX opens the page and goes back; SEQ from it goes to the steps
 tap FX
 wait 60
@@ -618,7 +618,7 @@ expect fxak 0
 # the tape stopped by hand while a note sounds: the knob turned to the far left in steps
 turn PRESET 4
 wait 60
-expect sound 39
+expect sound 37
 wav fx_tape_stop_by_hand.wav
 key 7 down 100
 wait 500
@@ -638,7 +638,7 @@ wavstop
 expect fxak -53
 turn PRESET -4
 wait 60
-expect sound 35
+expect sound 33
 # and with the tape stopped a key gives nothing
 wav fx_tape_stopped.wav
 peakreset

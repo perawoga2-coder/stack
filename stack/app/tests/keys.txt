@@ -65,7 +65,7 @@ expect_sysex F0 7D 46 4C 0D 00 00 F7
 expect receiving 0
 wait 100
 expect my1 1
-expect trk7 79
+expect trk7 70
 turn ALGO 6
 wait 30
 expect track 7

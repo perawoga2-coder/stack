@@ -6,7 +6,7 @@ wait 600
 shot title.png
 expect track 1
 expect sound 1
-expect nlist 82
+expect nlist 73
 expect undo 0
 # power on, press a key, hear track 1 at once (a drum: every key the same hit)
 wav t1_kick.wav
@@ -54,7 +54,7 @@ wait 40
 turn PRESET 1
 wait 40
 shot sound_change.png
-expect sound 37
+expect sound 35
 expect undo 1
 expect pitch 5
 expect level 70
@@ -62,7 +62,7 @@ leds
 tap REC
 wait 40
 shot undo.png
-expect sound 35
+expect sound 33
 expect undo 0
 leds
 tap REC
@@ -73,10 +73,10 @@ wait 30
 # the list stops at its ends
 turn PRESET 90
 wait 40
-expect sound 81
+expect sound 72
 turn PRESET 1
 wait 40
-expect sound 81
+expect sound 72
 turn PRESET -120
 wait 40
 expect sound 0
@@ -84,9 +84,9 @@ turn PRESET -1
 wait 40
 expect sound 0
 wait 1700
-turn PRESET 35
+turn PRESET 33
 wait 40
-expect sound 35
+expect sound 33
 expect cat 2
 # FILTER: off in the middle (seven detents), then low-pass left, high-pass right
 turn K2 3

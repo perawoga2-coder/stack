@@ -210,29 +210,11 @@
   },
   {
    "cat": "DRUMS",
-   "name": "SNARE STUDIO",
-   "from": "bank",
-   "file": "Studio Kit Snare.flac",
-   "rate": 22050,
-   "secs": 0.35,
-   "drum": 1
-  },
-  {
-   "cat": "DRUMS",
    "name": "CLAP STUDIO",
    "from": "bank",
    "file": "Studio Kit Clap.flac",
    "rate": 22050,
    "secs": 0.3,
-   "drum": 1
-  },
-  {
-   "cat": "DRUMS",
-   "name": "HAT TIGHT",
-   "from": "bank",
-   "file": "Tight Kit Hat Closed.flac",
-   "rate": 22050,
-   "secs": 0.12,
    "drum": 1
   },
   {
@@ -520,19 +502,6 @@
   },
   {
    "cat": "PAD",
-   "name": "SOFT PAD",
-   "from": "bank",
-   "file": "Soft Pad C4.flac",
-   "rate": 11025,
-   "hz": 261.626,
-   "loop": [
-    0.6,
-    0.7
-   ],
-   "fade": 0.2
-  },
-  {
-   "cat": "PAD",
    "name": "STRINGS",
    "from": "bank",
    "file": "Strings C4.flac",
@@ -572,19 +541,6 @@
   },
   {
    "cat": "PAD",
-   "name": "CLOUD PAD",
-   "from": "bank",
-   "file": "Cloud Pad C4.flac",
-   "rate": 11025,
-   "hz": 261.626,
-   "loop": [
-    0.6,
-    0.7
-   ],
-   "fade": 0.2
-  },
-  {
-   "cat": "PAD",
    "name": "SHIMMER",
    "from": "bank",
    "file": "Shimmer C4.flac",
@@ -601,19 +557,6 @@
    "name": "FM PAD",
    "from": "bank",
    "file": "Pad C4.flac",
-   "rate": 11025,
-   "hz": 261.626,
-   "loop": [
-    0.6,
-    0.7
-   ],
-   "fade": 0.2
-  },
-  {
-   "cat": "PAD",
-   "name": "DRONE",
-   "from": "bank",
-   "file": "Drone String C4.flac",
    "rate": 11025,
    "hz": 261.626,
    "loop": [
@@ -676,18 +619,6 @@
   },
   {
    "cat": "LEAD",
-   "name": "SYNC LEAD",
-   "from": "bank",
-   "file": "Sync Lead C4.flac",
-   "rate": 22050,
-   "hz": 261.626,
-   "loop": [
-    0.22,
-    0.18
-   ]
-  },
-  {
-   "cat": "LEAD",
    "name": "VOX LEAD",
    "from": "bank",
    "file": "Vox Lead C4.flac",
@@ -700,33 +631,9 @@
   },
   {
    "cat": "LEAD",
-   "name": "BRASS",
-   "from": "bank",
-   "file": "Brass C4.flac",
-   "rate": 22050,
-   "hz": 261.626,
-   "loop": [
-    0.22,
-    0.18
-   ]
-  },
-  {
-   "cat": "LEAD",
    "name": "RAVE",
    "from": "bank",
    "file": "Rave C4.flac",
-   "rate": 22050,
-   "hz": 261.626,
-   "loop": [
-    0.22,
-    0.18
-   ]
-  },
-  {
-   "cat": "LEAD",
-   "name": "CHIP",
-   "from": "bank",
-   "file": "Arp 8BIT C4.flac",
    "rate": 22050,
    "hz": 261.626,
    "loop": [
@@ -815,16 +722,6 @@
    "file": "Arcade.flac",
    "rate": 22050,
    "secs": 0.9,
-   "hz": 261.626,
-   "tail": 0.2
-  },
-  {
-   "cat": "FX",
-   "name": "METAL",
-   "from": "bank",
-   "file": "Metal.flac",
-   "rate": 22050,
-   "secs": 0.7,
    "hz": 261.626,
    "tail": 0.2
   },

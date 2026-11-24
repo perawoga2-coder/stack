@@ -624,7 +624,7 @@ turn ALGO 4
 wait 40
 turn PRESET 4
 wait 60
-expect sound 39
+expect sound 37
 tap SEQ
 wait 40
 press OCT-

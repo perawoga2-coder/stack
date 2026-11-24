@@ -48,7 +48,7 @@ tapkey w15
 turn ALGO 1
 wait 20
 expect track 4
-expect sound 25
+expect sound 23
 turn K4 20
 wait 20
 expect level 100
@@ -73,7 +73,7 @@ wait 20
 turn PRESET 5
 wait 30
 expect track 5
-expect sound 40
+expect sound 38
 turn K4 20
 wait 20
 expect level 100
@@ -96,7 +96,7 @@ tapkey w15
 turn ALGO 1
 wait 20
 expect track 6
-expect sound 60
+expect sound 55
 turn K4 20
 wait 20
 expect level 100
@@ -118,10 +118,10 @@ tapkey w14
 tapkey w15
 turn ALGO 1
 wait 20
-turn PRESET 51
+turn PRESET 48
 wait 30
 expect track 7
-expect sound 51
+expect sound 48
 turn K4 20
 wait 20
 expect level 100
@@ -143,10 +143,10 @@ tapkey w14
 tapkey w15
 turn ALGO 1
 wait 20
-turn PRESET 65
+turn PRESET 59
 wait 30
 expect track 8
-expect sound 65
+expect sound 59
 turn K4 20
 wait 20
 expect level 100

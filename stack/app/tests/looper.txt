@@ -48,7 +48,7 @@ expect page 0
 turn ALGO -3
 wait 60
 expect track 5
-expect sound 35
+expect sound 33
 # 3. OCT+ with the transport playing: one layer, one pattern long, from the next bar; then recording stops by itself
 wav looper_three_layers.wav
 tap PLAY
@@ -257,7 +257,7 @@ shot looper_t8_cleared.png
 # 9. no seams: a note held right across the take's end and the loop's point (the organ)
 turn PRESET 4
 wait 60
-expect sound 39
+expect sound 37
 wav looper_seam.wav
 tap OCT+
 wait 60

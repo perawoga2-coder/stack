@@ -16,7 +16,7 @@ import make_sounds as ms
 
 HDR = [0x7D, 0x46, 0x4C]
 ZONES, HDR_LEN, DATA_OFF, SLOT = 16, 32 + 16 * 28, 512, 0x14000
-NS = 78                                   # the built-in sounds: MY 1 is place NS + 1 in the list
+NS = 69                                   # the built-in sounds: MY 1 is place NS + 1 in the list
 
 
 def pack7(b):
@@ -227,7 +227,7 @@ def keys(out, folder):
         L += [f"expect octave {octave}"]
         for k in range(27):
             L += [f"key {k} down 100", "wait 30", "expect voices 1", f"key {k} up", "wait 250", "expect voices 0"]
-    L += ["expect midi_out 0", "tap OCT+", "wait 30", "tap OCT+", "wait 30", "expect octave 0", "wav keys_all.wav"]
+    L += ["# (the clock goes out since 0.4.2: what is checked is that no note does)", "expect notes_out 0", "tap OCT+", "wait 30", "tap OCT+", "wait 30", "expect octave 0", "wav keys_all.wav"]
     for k in range(27):
         L += [f"key {k} down 100", "wait 120", f"key {k} up", "wait 60"]
     L += ["wavstop", "expect lim_clips 0", "# held past its end, the sample stops: nothing after it is played",

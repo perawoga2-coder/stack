@@ -70,7 +70,7 @@ expect receiving 0
 wait 60
 shot receive_my1.png
 expect my1 1
-expect trk7 79
+expect trk7 70
 expect trk8 0
 sysex_out
 sysex F0 7D 46 4C 0F F7
@@ -83,7 +83,7 @@ expect my_gain1 <44
 turn ALGO 6
 wait 30
 expect track 7
-expect sound 79
+expect sound 70
 wav my1_kick.wav
 key 7 down 100
 wait 300
@@ -156,8 +156,8 @@ expect_sysex F0 7D 46 4C 0D 01 00 F7
 expect receiving 0
 wait 60
 expect my2 4
-expect trk8 80
-expect trk7 79
+expect trk8 71
+expect trk7 70
 turn ALGO 1
 wait 30
 expect track 8
@@ -228,8 +228,8 @@ expect receiving 0
 wait 60
 shot receive_in_list.png
 expect my3 1
-expect trk7 79
-expect trk8 80
+expect trk7 70
+expect trk8 71
 # a damaged transfer (the header's CRC is not the data's): refused
 sysex_out
 sysex F0 7D 46 4C 0F F7
@@ -268,8 +268,8 @@ expect receiving 0
 wait 60
 shot receive_refused.png
 expect my3 0
-expect trk7 79
-expect trk8 80
+expect trk7 70
+expect trk8 71
 # a transfer that stops half way: given up after 5 s
 sysex_out
 sysex F0 7D 46 4C 0F F7
@@ -339,7 +339,7 @@ key 7 up
 wait 60
 shot receive_again.png
 expect my1 1
-expect trk7 79
+expect trk7 70
 # a 9 s sample from MY 2 over MY 3 (two slots)
 sysex_out
 sysex F0 7D 46 4C 0F F7
@@ -1134,7 +1134,7 @@ expect receiving 0
 wait 60
 expect my2 1
 expect my3 0
-expect trk8 80
+expect trk8 71
 sysex_out
 sysex F0 7D 46 4C 0F F7
 expect_sysex F0 7D 46 4C 0F 03 50 01 53 4E 41 52 45 00 03 01 4C 4F 4E 47 00 60 00 00 00 01 02 41 F7
@@ -1142,7 +1142,7 @@ turn ALGO 1
 wait 30
 turn PRESET 1
 wait 40
-expect sound 81
+expect sound 72
 shot receive_joined.png
 turn PRESET -1
 wait 40
@@ -1200,7 +1200,7 @@ wait 3600
 expect my_crc1 2
 turn ALGO 6
 wait 30
-turn PRESET 79
+turn PRESET 70
 wait 60
 shot my_crc_marked.png
 # a header that is not one: refused, and the list says what was found
@@ -1216,7 +1216,7 @@ expect my1 0
 expect my_why1 2
 turn ALGO 6
 wait 30
-turn PRESET 79
+turn PRESET 70
 wait 60
 shot my_refused.png
 expect lim_clips 0
