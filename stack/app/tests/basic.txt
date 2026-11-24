@@ -131,6 +131,18 @@ wait 20
 release OCT+
 wait 60
 expect octave 1
+# (that chord went into the looper's mode: tests/looper.txt; the same chord goes out of it)
+expect loop_mode 1
+press OCT+
+wait 20
+press OCT-
+wait 60
+release OCT+
+wait 20
+release OCT-
+wait 60
+expect loop_mode 0
+expect octave 1
 tap OCT-
 wait 30
 expect octave 0

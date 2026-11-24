@@ -159,6 +159,7 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and th
 #define ENV_AUTO (-1)                    /* RELEASE as before the ENV page: a held sound lets go at DECAY's pace, a hit
                                           * plays through */
 #define ENV_V_START 75                   /* VELOCITY as before: a quarter of the loudness fixed, the rest the finger's */
+#define LOOP_HOLD_MS 700u                /* OCT- held this long in the looper's mode clears */
 #define NTRK 8u
 #define NSTEP 16u
 #define FILT_DEAD 3                      /* FILTER: -FILT_DEAD .. +FILT_DEAD is off (seven detents wide) */
@@ -376,6 +377,8 @@ static void midi_in(void)                    /* audio interrupt: MIDI in plays t
     }
 }
 volatile uint8_t ui_sel_isr;                 /* the selected track, as the audio interrupt sees it */
+volatile uint8_t ui_step_isr;                /* the step page is up */
+
 
 static void seq_fire(uint32_t step, uint32_t delay)
 {
@@ -388,13 +391,17 @@ static void seq_fire(uint32_t step, uint32_t delay)
     seq_step_now = (uint8_t)step;
 }
 
+static int32_t seq_bar_off;                  /* where in this block the pattern's first step starts (-1: not in it) */
+static void seq_start_hook(void);            /* (the looper: its loop starts with the pattern) */
 static void seq_block(uint32_t n)
 {
     const float step_frames = 44100.0f * 60.0f / (SEQ_BPM * 4.0f);
+    seq_bar_off = -1;
     if (seq_play_req && !seq_running) {      /* PLAY: from step 1, now */
         seq_running = 1;
         seq_next = 0;
         seq_left = 0.0f;
+        seq_start_hook();
     } else if (!seq_play_req && seq_running) {
         uint32_t t;
         seq_running = 0;
@@ -404,6 +411,8 @@ static void seq_block(uint32_t n)
     if (!seq_running)
         return;
     while (seq_left < (float)n) {
+        if (!seq_next)
+            seq_bar_off = (int32_t)seq_left;
         seq_fire(seq_next, (uint32_t)seq_left);
         seq_next = (seq_next + 1u) % NSTEP;
         seq_left += step_frames;
@@ -416,6 +425,11 @@ static float tb[APP_BLOCK];                  /* one track's bus */
 static float mixl[APP_BLOCK], mixr[APP_BLOCK];
 #include "fx.c"                          /* the effects: two slots a track */
 _Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
+#include "looper.c"                      /* the looper on track 8 */
+#define PAT_FRAMES ((uint32_t)(44100.0f * 60.0f / (SEQ_BPM * 4.0f) * (float)NSTEP))   /* the pattern's length */
+static float rb[APP_BLOCK];                  /* a track's voices that a take records (played by hand) */
+static float recf[NTRK][4];                  /* and the track's FILTER on them alone */
+static void seq_start_hook(void) { lp.bar = (uint8_t)(lp.bars - 1u); }
 
 /* what a track's envelope is this block (render_part works it out from the track's knobs) */
 typedef struct {
@@ -425,7 +439,7 @@ typedef struct {
     float rcoef;                         /* RELEASE */
 } env_t;
 
-static void voice_render(voice_t *v, uint32_t n, const env_t *e, float rate)
+static void voice_render(voice_t *v, float *out, uint32_t n, const env_t *e, float rate)
 {
     uint32_t i = v->delay;
     float frac = v->frac, inc = v->inc * rate, env = v->env, att = v->att;
@@ -445,7 +459,7 @@ static void voice_render(voice_t *v, uint32_t n, const env_t *e, float rate)
             env += (sus - env) * kd;
         else
             env *= dcoef;
-        tb[i] += (s0 + (s1 - s0) * frac) * amp * env * (att < 1.0f ? att : 1.0f);
+        out[i] += (s0 + (s1 - s0) * frac) * amp * env * (att < 1.0f ? att : 1.0f);
         frac += inc;
         while (frac >= 1.0f) {               /* on to the next samples (INC_MAX of them at most) */
             frac -= 1.0f;
@@ -469,7 +483,7 @@ static void voice_render(voice_t *v, uint32_t n, const env_t *e, float rate)
 static void render_part(int32_t *lr, uint32_t n, float gain)
 {
     uint32_t t, i, k, on = 0;
-    uint32_t r = evq_r;
+    uint32_t r = evq_r, take = lp.state != LP_IDLE || lp.req == LQ_ARM;   /* a take is armed or runs */
     if (my_kill) {                           /* a slot of the app's is about to be erased: its voices end here */
         for (k = 0; k < NVOICE; k++)
             if (voice[k].my && (my_kill >> (voice[k].my - 1u) & 1u))
@@ -490,7 +504,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
     midi_in();
     seq_block(n);
     for (i = 0; i < n; i++)
-        mixl[i] = mixr[i] = 0.0f;
+        mixl[i] = mixr[i] = rec_in[i] = 0.0f;
     for (t = 0; t < NTRK; t++) {
         const sound_t *s = list_sound(trk[t].sound);
         int32_t f = trk[t].filt;
@@ -499,7 +513,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         float lp1 = bus[t].lp1, lp2 = bus[t].lp2, hp1 = bus[t].hp1, hp2 = bus[t].hp2;
         float fa[2], rate_t = 1.0f, dry = 1.0f;
         env_t ev;
-        uint32_t any = 0, ft[2], fs[2], q;
+        uint32_t any = 0, anyr = 0, ft[2], fs[2], q, loop8 = t == NTRK - 1u && lp.own;
         for (q = 0; q < 2u; q++) {               /* the two slots: what, which side, how much */
             ft[q] = trk[t].fx[q] < NFX ? trk[t].fx[q] : FX_OFF;
             fa[q] = fx_amount(trk[t].fxk[q], &fs[q]);
@@ -530,12 +544,26 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             b_t = 1.0f - fm_expf(-6.2831853f * 30.0f * fm_exp2f((float)(f - FILT_DEAD) * 0.15f) * (1.0f / 44100.0f));
         for (i = 0; i < n; i++)
             tb[i] = 0.0f;
-        for (k = 0; k < NVOICE; k++)
-            if (voice[k].state != V_OFF && voice[k].track == t) {
-                voice_render(&voice[k], n, &ev, tape_rate[t]);
-                any = 1;
-                on++;
-            }
+        if (loop8) {                             /* track 8 as the looper: the loop is its sound (no voices) */
+            any = loop_block(tb, n, seq_bar_off, seq_running, PAT_FRAMES);
+            g_t *= 1.0f / 0.64f;                 /* (LEVEL at its 80: the loop as it was played) */
+        } else {
+            for (k = 0; k < NVOICE; k++)
+                if (voice[k].state != V_OFF && voice[k].track == t) {
+                    /* what a take records: the keys' own notes; on the step page the steps of the track on it */
+                    uint32_t mine = take && (!voice[k].seq || (ui_step_isr && t == ui_sel_isr));
+                    if (mine && !anyr) {
+                        for (i = 0; i < n; i++)
+                            rb[i] = 0.0f;
+                        anyr = 1;
+                    }
+                    voice_render(&voice[k], mine ? rb : tb, n, &ev, tape_rate[t]);
+                    any = 1;
+                    on++;
+                }
+        }
+        if (!anyr)
+            recf[t][0] = recf[t][1] = recf[t][2] = recf[t][3] = 0.0f;
         if (!any && fm_fabsf(lp2) < 1e-6f && fm_fabsf(hp2) < 1e-6f) {
             bus[t].a = a_t;                  /* silent: nothing to filter, the knobs' values taken at once */
             bus[t].b = b_t;
@@ -554,13 +582,28 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             x -= hp1;
             hp2 += b * (x - hp2);
             tb[i] = x - hp2;
+            if (anyr) {                          /* the same FILTER on the take's part alone; then it joins the track */
+                float y = rb[i];
+                recf[t][0] += a * (y - recf[t][0]);
+                recf[t][1] += a * (recf[t][0] - recf[t][1]);
+                y = recf[t][1];
+                recf[t][2] += b * (y - recf[t][2]);
+                y -= recf[t][2];
+                recf[t][3] += b * (y - recf[t][3]);
+                rb[i] = y - recf[t][3];
+            }
         }
+        if (anyr)                                /* (the two filters are the one filter on the sum: it is linear) */
+            for (i = 0; i < n; i++)
+                tb[i] += rb[i];
         for (q = 0; q < 2u; q++)                 /* OVERDRIVE and LO-FI: on the track itself, slot A then B */
             if (ft[q] == FX_DRIVE || ft[q] == FX_LOFI)
                 fx_inline(ft[q], fs[q], fa[q], &fx_slot[t][q], tb, n);
         for (i = 0; i < n; i++) {                /* LEVEL */
             g += (g_t - g) * 0.004f;
             tb[i] *= g;
+            if (anyr)
+                rec_in[i] += rb[i] * g;          /* the take hears it here: after LEVEL, before the effects */
         }
         for (q = 0; q < 2u; q++)                 /* the shared effects: this track's part into their buses */
             if (FX_BUS[ft[q]] >= 0)
@@ -665,6 +708,9 @@ static uint32_t my_t0;                       /* plat_ms at the start */
 void app_init(void)
 {
     fx_reset();
+    memset(&lp, 0, sizeof lp);               /* no loop at a start: it was never kept */
+    lp.div = 2;
+    lp.bars = 1;
     memset(my, 0, sizeof my);                /* (a start is from nothing: the simulator's restart keeps the RAM) */
     ms.slot = -1;
     mc.slot = -1;
@@ -693,6 +739,11 @@ static struct {
     int8_t hot;                          /* the knob turned last (0..3), lit for a moment */
     uint32_t hot_t;
     uint8_t title;                       /* the title is up (the first TITLE_MS after a start) */
+    uint8_t loop_mode;                   /* the looper's mode: OCT+ and OCT- are the looper's */
+    uint8_t dn_fired;                    /* OCT- held long enough: it cleared (letting go is no undo) */
+    uint32_t dn_t;                       /* OCT- went down in the looper's mode (0: not held) */
+    uint32_t loop_seen;                  /* takes finished that the screen has said */
+    uint32_t loop_drawn;                 /* the looper's state as the screen shows it */
     uint8_t cpu;                         /* plat_cpu_pct, as drawn */
     uint32_t cpu_t;
     uint8_t redraw;
@@ -769,11 +820,112 @@ static void speak(void)                      /* a screen reader that asks hears 
 
 /* PRESETS: the selected track's sound, one place along the list; the list stops at its ends. Only the sound changes:
  * the knobs' values, the steps and the other tracks stay. The screen says the old and the new */
+/* ------------------------------------------------------------------ the looper's side of the panel --- */
+static int t8_in_use(void)                   /* track 8 has a sound or steps of its own */
+{
+    uint32_t i, any = trk[NTRK - 1u].sound != 0u;
+    for (i = 0; i < NSTEP; i++)
+        any |= step_on[NTRK - 1u][i];
+    return (int)any;
+}
+static int on_t8l(void) { return ui.sel == NTRK - 1u && lp.own; }   /* track 8 is selected and is the looper */
+static void say_t8l(void) { app_say("SELECT T1-7 TO PLAY", ""); }
+
+static void layer_text(char *a, uint32_t n)  /* "LAYER 3" */
+{
+    char c[8];
+    a[0] = 0;
+    text_cat(a, "LAYER ");
+    int_text((int32_t)n, c);
+    text_cat(a, c);
+}
+
+static void looper_mode(void)                /* OCT- and OCT+ together: into the looper's mode, or out of it */
+{
+    ui.loop_mode = (uint8_t)!ui.loop_mode;
+    ui.dn_t = 0;
+    if (!ui.loop_mode) {
+        app_say("LOOPER MODE", "OFF");       /* (a loop plays on; without one track 8 is a track again: app_frame) */
+    } else if (!lp.own && t8_in_use()) {
+        app_say("TRACK 8 IN USE", "HOLD - TO CLEAR");
+    } else {
+        lp.own = 1;                          /* track 8 is free: it is the looper */
+        app_say("LOOPER MODE", "ON");
+    }
+}
+
+static void looper_add(void)                 /* OCT+: a layer, one pass of the pattern from the next bar */
+{
+    char a[20];
+    if (!lp.own) {
+        app_say("TRACK 8 IN USE", "HOLD - TO CLEAR");
+    } else if (!seq_play_req) {
+        app_say("Press PLAY first", "");
+    } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
+        app_say("RECORDING", "WAIT");
+    } else {
+        uint32_t div = lp.has ? lp.div : looper_fit(PAT_FRAMES * lp.bars);
+        if (!div) {
+            app_say("PATTERN TOO LONG", "TO LOOP");
+            return;
+        }
+        lp.req = LQ_ARM;
+        if (div == 4u && !lp.has) {          /* said before the take, not found out after */
+            app_say("LONG PATTERN:", "LOOP AT 11 KHZ");
+        } else {
+            layer_text(a, lp.layers + 1u);
+            app_say(a, "FROM THE NEXT BAR");
+        }
+    }
+}
+
+static void looper_undo(void)                /* OCT- let go: the take under way is dropped, or the newest layer goes */
+{
+    char a[20];
+    if (!lp.own) {
+        app_say("TRACK 8 IN USE", "HOLD - TO CLEAR");
+    } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
+        lp.req = LQ_CANCEL;
+        app_say("TAKE", "CANCELLED");
+    } else if (lp.undo) {
+        layer_text(a, lp.layers);
+        lp.req = LQ_UNDO;
+        app_say(a, "UNDONE");
+    } else if (lp.has) {
+        app_say("ONLY 1 LAYER", "CAN BE UNDONE");
+    } else {
+        app_say("NO LAYER TO UNDO", "");
+    }
+}
+
+static void looper_clear(void)               /* OCT- held: the whole loop goes; or track 8's own sound and steps */
+{
+    uint32_t i;
+    if (!lp.own) {                           /* track 8 was in use: emptied, and the looper's from now */
+        trk[NTRK - 1u].sound = 0;
+        for (i = 0; i < NSTEP; i++)
+            step_on[NTRK - 1u][i] = 0;
+        if (ui.undo_ok && ui.undo_trk == NTRK - 1u)
+            ui.undo_ok = 0;                  /* (no putting back a sound on the looper's track) */
+        lp.own = 1;
+        app_say("TRACK 8 CLEARED", "LOOPER READY");
+    } else if (lp.has || lp.state != LP_IDLE) {
+        lp.req = LQ_CLEAR;
+        app_say("LOOP CLEARED", "");
+    } else {
+        app_say("NOTHING TO CLEAR", "");
+    }
+}
+
 static void sound_turn(int32_t e)
 {
     uint32_t t = ui.sel, old = trk[t].sound, now = plat_ms();
     int32_t to = clamp((int32_t)old + e, 0, (int32_t)NLIST - 1);
     char a[28], b[28], m[28];
+    if (on_t8l()) {                          /* the looper's track has no sound to pick */
+        say_t8l();
+        return;
+    }
     if ((uint32_t)to == old) {
         app_say(e < 0 ? "START OF LIST" : "END OF LIST", "");
         return;
@@ -929,6 +1081,11 @@ static void input(void)
     /* the keys: on the play page they play the selected track; on the step page the 16 white keys are the steps */
     for (k = 0; k < NKEYS; k++) {
         uint32_t bit = 1u << k, down = (keys & bit) && !(ui.keys & bit), up = !(keys & bit) && (ui.keys & bit);
+        if (on_t8l()) {                      /* the looper's track: the keys are silent, and the screen says why */
+            if (down)
+                say_t8l();
+            continue;
+        }
         if (ui.page == PAGE_STEP) {
             uint32_t s;
             for (s = 0; s < 16u && WK[s] != k; s++)
@@ -968,18 +1125,39 @@ static void input(void)
         }
     }
 
-    /* OCT- and OCT+: the octave moves when the button is let go. Both down together is the looper's chord (kept for
-     * a later version): then neither release moves the octave, whichever finger came first */
+    /* OCT- and OCT+ act when the button is let go. Both down together is the looper's chord: into its mode or out
+     * of it, and then neither release does anything, whichever finger came first. Out of the mode they move the
+     * keys' octave; in it the octave stays, OCT+ adds a layer, OCT- takes the newest off and, held, clears */
     if ((btn >> B_OCTDN & 1u) && (btn >> B_OCTUP & 1u) && !ui.oct_chord) {
         ui.oct_chord = 1;
-        app_say("LOOPER", "NOT IN THIS VERSION");
+        looper_mode();
     }
-    if (released >> B_OCTDN & 1u) {
-        if (!ui.oct_chord)
+    if (ui.loop_mode) {
+        uint32_t now = plat_ms();
+        if ((pressed >> B_OCTDN & 1u) && !ui.oct_chord) {
+            ui.dn_t = now | 1u;
+            ui.dn_fired = 0;
+        }
+        if (ui.dn_t && (btn >> B_OCTDN & 1u) && !ui.oct_chord && !ui.dn_fired && now - ui.dn_t >= LOOP_HOLD_MS) {
+            ui.dn_fired = 1;
+            looper_clear();
+        }
+        if (released >> B_OCTDN & 1u) {
+            if (ui.dn_t && !ui.oct_chord && !ui.dn_fired)
+                looper_undo();
+            ui.dn_t = 0;
+            ui.redraw = 1;
+        }
+        if ((released >> B_OCTUP & 1u) && !ui.oct_chord)
+            looper_add();
+        if (ui.oct_chord)
+            ui.dn_t = 0;
+        if (ui.dn_t)
+            ui.redraw = 1;                   /* (the hold's bar grows) */
+    } else {
+        if ((released >> B_OCTDN & 1u) && !ui.oct_chord)
             octave_step(-1);
-    }
-    if (released >> B_OCTUP & 1u) {
-        if (!ui.oct_chord)
+        if ((released >> B_OCTUP & 1u) && !ui.oct_chord)
             octave_step(1);
     }
     if (ui.oct_chord && !(btn >> B_OCTDN & 1u) && !(btn >> B_OCTUP & 1u))
@@ -994,7 +1172,12 @@ static void input(void)
             sound_undo();
         } else if (k == B_PLAY) {
             seq_play_req = (uint8_t)!seq_play_req;
-            app_say(seq_play_req ? "PLAY" : "STOP", "");
+            if (!seq_play_req && (lp.state != LP_IDLE || lp.req == LQ_ARM))
+                app_say("STOP:", "TAKE CANCELLED");  /* (a take cannot outlast the transport) */
+            else
+                app_say(seq_play_req ? "PLAY" : "STOP", "");
+        } else if (k == B_SEQ && on_t8l()) {     /* the looper's track has no steps */
+            say_t8l();
         } else if (k == B_SEQ || k == B_FX || k == B_ENV) {   /* SEQ: the steps and back; FX, ENV: their pages and back */
             uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : PAGE_ENV;
             ui.page = (uint8_t)(ui.page == to ? PAGE_PLAY : to);
@@ -1016,6 +1199,11 @@ static void input(void)
             ui_sel_isr = ui.sel;
             ui.held_step = -1;
             ui.redraw = 1;
+            if (on_t8l()) {                  /* onto the looper's track: the keys will be silent, said at once */
+                if (ui.page == PAGE_STEP)
+                    ui.page = PAGE_PLAY;     /* (it has no steps to show) */
+                say_t8l();
+            }
         }
     }
     if ((e = plat_enc(EN_PRESET)) != 0)
@@ -1031,7 +1219,12 @@ static void input(void)
     ui.btn = btn;
 
     /* the lights: REC only while there is a sound to undo; SEQ on the step page; PLAY while playing */
+    ui_step_isr = ui.page == PAGE_STEP;
     lit_btn = (ui.undo_ok ? 1u << B_REC : 0u) | (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
+              /* the looper's mode: OCT+ lit through a take (blinking while it waits for the bar), OCT- while a layer
+               * can be taken off */
+              (ui.loop_mode && (lp.state == LP_REC || (lp.state == LP_ARMED && (plat_ms() >> 7 & 1u))) ? 1u << B_OCTUP : 0u) |
+              (ui.loop_mode && lp.undo ? 1u << B_OCTDN : 0u) |
               (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
         for (k = 0; k < 16u; k++)
@@ -1059,6 +1252,42 @@ static void draw_header(void)
     if (now < ui.msg_until) {
         int32_t x = cv_text(6, 0, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
+    } else if (ui.loop_mode) {
+        /* the looper's mode, plain to see: its name on a block, then where it stands */
+        const char *w;
+        char c[8];
+        t[0] = 0;
+        cv_rect(0, 0, 60, 16, C_ORANGE);
+        cv_text(5, 0, &FONT_B, "LOOPER", C_BLACK);
+        if (ui.dn_t && !ui.dn_fired && now - (ui.dn_t & ~1u) > 150u) {
+            w = "HOLD TO CLEAR";
+        } else if (!lp.own) {
+            w = "TRACK 8 IN USE: HOLD - TO CLEAR";
+        } else if (lp.state == LP_REC) {
+            text_cat(t, "RECORDING LAYER ");
+            int_text(lp.layers + 1, c);
+            text_cat(t, c);
+            w = t;
+        } else if (lp.state == LP_ARMED) {
+            w = "WAITS FOR THE BAR";
+        } else if (lp.has) {
+            int_text(lp.layers, c);
+            text_cat(t, c);
+            text_cat(t, lp.layers == 1u ? " LAYER" : " LAYERS");
+            text_cat(t, lp.undo ? "  UNDO 1" : "");
+            w = t;
+        } else {
+            w = seq_play_req ? "EMPTY: OCT+ RECORDS" : "EMPTY: PLAY, THEN OCT+";
+        }
+        cv_text(66, 2, &FONT_XS, w, lp.state == LP_REC ? C_WHITE : C_HI);
+        if (ui.dn_t && !ui.dn_fired && now - (ui.dn_t & ~1u) > 150u) {     /* the hold's bar, full when it clears */
+            uint32_t held = now - (ui.dn_t & ~1u);
+            cv_rect(66, 20, 168, 5, C_LINE);
+            cv_rect(66, 20, (int32_t)(held >= LOOP_HOLD_MS ? 168u : held * 168u / LOOP_HOLD_MS), 5, C_WHITE);
+        } else if (lp.state == LP_REC && lp.total) {                       /* a take: how far through the pattern */
+            cv_rect(66, 20, 168, 3, C_LINE);
+            cv_rect(66, 20, (int32_t)((uint64_t)lp.frame * 168u / lp.total), 3, C_ORANGE);
+        }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
         cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : "TRACKS",
@@ -1093,6 +1322,26 @@ static void draw_tracks(void)                /* the play page: the eight tracks,
             if (sel)
                 cv_rect(0, y, 240, 19, C_ORANGE);
             trk_text(k, n);
+            if (k == NTRK - 1u && lp.own) {      /* track 8 as the looper: T8L, and what its loop holds */
+                char c[8];
+                cv_text(6, y + 2, &FONT_B, "T8L", sel ? C_BLACK : C_ORANGE);
+                t[0] = 0;
+                text_cat(t, "LOOP ");
+                if (lp.has) {
+                    int_text(lp.layers, c);
+                    text_cat(t, c);
+                    text_cat(t, lp.layers == 1u ? " LAYER" : " LAYERS");
+                } else {
+                    text_cat(t, "(EMPTY)");
+                }
+                cv_text(40, y + 2, sel ? &FONT_B : &FONT_S, t, sel ? C_BLACK : lp.has ? C_WHITE : C_DIM);
+                if (lp.has) {
+                    int32_t w = (int32_t)trk[k].level * 30 / 100;
+                    cv_rect(204, y + 8, 30, 3, sel ? C_BLACK : C_LINE);
+                    cv_rect(204, y + 8, w, 3, sel ? C_WHITE : C_AMB);
+                }
+                continue;
+            }
             cv_text(6, y + 2, &FONT_B, n, sel ? C_BLACK : C_GRAY);
             list_name(trk[k].sound, t);
             cv_text(40, y + 2, sel ? &FONT_B : &FONT_S, t, sel ? C_BLACK : s ? C_WHITE : C_DIM);
@@ -1197,7 +1446,10 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             cv_rect(p - 1, 32, 3, 7, t->filt >= -FILT_DEAD && t->filt <= FILT_DEAD ? C_GRAY : C_ORANGE);
         }
     }
-    cv_text(4, 40, &FONT_T, ui.undo_ok ? "REC: UNDO SOUND" : "ALGO: TRACK  PRESETS: SOUND", ui.undo_ok ? C_WHITE : C_DIM);
+    if (ui.loop_mode)                        /* the looper's mode: what its two buttons do */
+        cv_text(4, 40, &FONT_T, "OCT+: ADD LAYER  OCT-: UNDO LAYER", C_WHITE);
+    else
+        cv_text(4, 40, &FONT_T, ui.undo_ok ? "REC: UNDO SOUND" : "ALGO: TRACK  PRESETS: SOUND", ui.undo_ok ? C_WHITE : C_DIM);
     {                                        /* where the track's sound is in the list: its category and place there */
         char c[20];
         cat_text(t->sound, c);
@@ -1341,8 +1593,8 @@ static void my_arrived(uint32_t k)
     if (t < NTRK) {
         text_cat(b, "ON T");
     } else {
-        for (t = 6; t < NTRK && trk[t].sound; t++)
-            ;
+        for (t = 6; t < NTRK && (trk[t].sound || (t == NTRK - 1u && lp.own)); t++)
+            ;                                    /* (track 8 as the looper is not empty to it) */
         if (t < NTRK) {
             trk[t].sound = (uint8_t)li;
             text_cat(b, "> T");
@@ -1414,6 +1666,9 @@ void app_ui_init(void)
 {
     my_t0 = plat_ms();
     ui.title = 1;
+    ui.loop_mode = 0;
+    ui.dn_t = 0;
+    ui.oct_chord = 0;
     touch_on(1);                             /* velocity: the keys' readings on */
     plat_usb_audio_full(1);                  /* USB audio at full level, whatever MASTER says */
     lcd_fill(0, 0, 240, 240, C_BLACK);
@@ -1441,6 +1696,23 @@ void app_frame(void)
     }
     if (ui.undo_ok && now - ui.undo_t >= 1500u && now - ui.undo_t < 1600u)
         ui.redraw = 1;
+    if (!ui.loop_mode)                       /* out of the mode track 8 is the looper's only while a loop is there */
+        lp.own = (uint8_t)(lp.has || lp.state != LP_IDLE || lp.fading);
+    if (lp.done != ui.loop_seen) {           /* a take is in */
+        char a[20];
+        ui.loop_seen = lp.done;
+        layer_text(a, lp.layers);
+        app_say(a, "IN THE LOOP");
+    }
+    {   /* the looper's state changed, or a take moves on: the screen follows */
+        uint32_t st = lp.own | lp.has << 1 | lp.state << 2 | lp.undo << 4 | (uint32_t)lp.layers << 5 |
+                      (lp.state == LP_REC && lp.total ? (lp.frame * 32u / lp.total) << 13 : 0u) |
+                      (lp.state == LP_ARMED ? (now >> 7 & 1u) << 20 : 0u);
+        if (st != ui.loop_drawn) {
+            ui.loop_drawn = st;
+            ui.redraw = 1;
+        }
+    }
     if (ui.title && now - my_t0 >= TITLE_MS) {
         ui.title = 0;
         ui.redraw = 1;
@@ -1521,6 +1793,24 @@ int app_expect(const char *what, int *got)
         *got = rx.on;
     else if (!strncmp(what, "trk", 3) && what[3] >= '1' && what[3] <= '8')  /* trkN: track N's place in the list */
         *got = trk[what[3] - '1'].sound;
+    else if (!strcmp(what, "loop_mode"))     /* the looper: its mode, track 8 its own, a loop there, its layers, */
+        *got = ui.loop_mode;
+    else if (!strcmp(what, "loop_own"))
+        *got = lp.own;
+    else if (!strcmp(what, "loop_has"))
+        *got = lp.has;
+    else if (!strcmp(what, "loop_layers"))
+        *got = lp.layers;
+    else if (!strcmp(what, "loop_undo"))     /* a layer can be taken off, */
+        *got = lp.undo;
+    else if (!strcmp(what, "loop_state"))    /* 0 idle, 1 waiting for the bar, 2 recording, */
+        *got = lp.state;
+    else if (!strcmp(what, "loop_khz"))      /* and its rate: 22 or 11 */
+        *got = lp.div == 4u ? 11 : 22;
+    else if (!strncmp(what, "loop_bars", 9)) {   /* a test: the loop spans this many passes of the pattern (1 as built) */
+        lp.bars = (uint8_t)(what[9] >= '1' && what[9] <= '4' ? what[9] - '0' : 1);
+        *got = lp.bars;
+    }
     else if (!strcmp(what, "env_a"))         /* the selected track's ATTACK, RELEASE (-1 AUTO), SUSTAIN, VELOCITY */
         *got = trk[ui.sel].env_a;
     else if (!strcmp(what, "env_r"))

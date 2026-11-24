@@ -1,0 +1,374 @@
+# STACK in the host simulator: the looper on track 8. Each part is one of the ten decided points.
+#   app/build/host/stack_host app/tests/looper.txt app/build/host
+master 4096
+wait 2200
+# 1. OCT- and OCT+ together: into the mode; the octave does not move (it moves on release only, never on a chord)
+expect loop_mode 0
+press OCT-
+wait 20
+press OCT+
+wait 60
+release OCT+
+wait 20
+release OCT-
+wait 60
+expect loop_mode 1
+expect octave 0
+shot looper_on.png
+leds
+# 2. track 8 was empty: it is the looper at once
+expect loop_own 1
+expect trk8 0
+# 1. in the mode the octave cannot change; 3. OCT+ with the transport stopped does nothing: Press PLAY first
+tap OCT+
+wait 60
+expect octave 0
+expect loop_state 0
+shot looper_press_play.png
+tap OCT-
+wait 60
+expect octave 0
+expect loop_layers 0
+# 2. on T8L the keys are silent, PRESETS and SEQ do nothing: SELECT T1-7 TO PLAY
+turn ALGO 7
+wait 60
+expect track 8
+shot looper_t8l.png
+key 7 down 100
+wait 60
+expect voices 0
+key 7 up
+wait 20
+turn PRESET 5
+wait 60
+expect sound 0
+tap SEQ
+wait 60
+expect page 0
+turn ALGO -3
+wait 60
+expect track 5
+expect sound 35
+# 3. OCT+ with the transport playing: one layer, one pattern long, from the next bar; then recording stops by itself
+wav looper_three_layers.wav
+tap PLAY
+wait 300
+tap OCT+
+wait 60
+expect loop_state 1
+shot looper_waits.png
+wait 1900
+expect loop_state 2
+shot looper_recording.png
+# 3. OCT+ during a take is ignored (a message), the take goes on
+tap OCT+
+wait 60
+expect loop_state 2
+expect loop_layers 0
+key 7 down 100
+wait 300
+key 7 up
+wait 60
+key 11 down 100
+wait 300
+key 11 up
+wait 60
+wait 1150
+expect loop_state 0
+expect loop_layers 1
+expect loop_has 1
+expect loop_undo 1
+shot looper_one_layer.png
+# 6. the loop plays what was played by hand: with no key down, track 8 sounds
+wait 300
+peakreset
+wait 1800
+expect peak_db_min -30
+expect voices 0
+# two more layers on top
+tap OCT+
+wait 60
+expect loop_state 1
+wait 2040
+expect loop_state 2
+key 14 down 100
+wait 260
+key 14 up
+wait 60
+key 18 down 100
+wait 260
+key 18 up
+wait 60
+wait 1402
+expect loop_state 0
+expect loop_layers 2
+expect loop_has 1
+expect loop_undo 1
+tap OCT+
+wait 60
+expect loop_state 1
+wait 2040
+expect loop_state 2
+key 21 down 100
+wait 200
+key 21 up
+wait 60
+key 23 down 100
+wait 200
+key 23 up
+wait 60
+key 25 down 100
+wait 200
+key 25 up
+wait 60
+wait 1258
+expect loop_state 0
+expect loop_layers 3
+expect loop_has 1
+expect loop_undo 1
+wait 4000
+wavstop
+shot looper_three_layers.png
+# 4. OCT- short: the newest layer goes; a second press does nothing (only 1 layer can be undone)
+wav looper_undo.wav
+wait 2000
+tap OCT-
+wait 100
+expect loop_layers 2
+expect loop_undo 0
+expect loop_has 1
+wait 3900
+tap OCT-
+wait 100
+expect loop_layers 2
+shot looper_only_one_undo.png
+wait 1900
+wavstop
+# 4. OCT- during a take: that take is dropped, the loop is as it was
+tap OCT+
+wait 2100
+expect loop_state 2
+key 7 down 100
+wait 200
+tap OCT-
+wait 60
+expect loop_state 0
+key 7 up
+wait 2200
+expect loop_layers 2
+expect loop_has 1
+# 1. out of the mode: the loop plays on, track 8 stays T8L, and the octave buttons are the octave's again
+press OCT-
+wait 20
+press OCT+
+wait 60
+release OCT+
+wait 20
+release OCT-
+wait 60
+expect loop_mode 0
+expect loop_has 1
+expect loop_own 1
+shot looper_mode_off_t8l.png
+peakreset
+wait 2100
+expect peak_db_min -30
+tap OCT+
+wait 60
+expect octave 1
+tap OCT-
+wait 60
+expect octave 0
+expect loop_layers 2
+# 5. OCT- held: the whole loop goes (a bar that fills, then the message); track 8 is an empty track again out of the mode
+press OCT-
+wait 20
+press OCT+
+wait 60
+release OCT+
+wait 20
+release OCT-
+wait 60
+expect loop_mode 1
+wav looper_clear.wav
+wait 1200
+press OCT-
+wait 400
+shot looper_hold_bar.png
+expect loop_has 1
+wait 400
+release OCT-
+wait 200
+expect loop_has 0
+expect loop_layers 0
+expect loop_undo 0
+shot looper_cleared.png
+wait 1500
+wavstop
+press OCT-
+wait 20
+press OCT+
+wait 60
+release OCT+
+wait 20
+release OCT-
+wait 60
+expect loop_mode 0
+wait 60
+expect loop_own 0
+expect trk8 0
+shot looper_t8_normal.png
+# 2. track 8 in use: nothing is erased; the screen says so; OCT+ records nothing; OCT- held clears it, then it is the looper
+turn ALGO 3
+wait 60
+expect track 8
+turn PRESET 3
+wait 60
+expect sound 3
+turn ALGO -3
+wait 60
+press OCT-
+wait 20
+press OCT+
+wait 60
+release OCT+
+wait 20
+release OCT-
+wait 60
+expect loop_mode 1
+expect loop_own 0
+expect trk8 3
+wait 1700
+shot looper_t8_in_use.png
+tap OCT+
+wait 60
+expect loop_state 0
+expect trk8 3
+tap OCT-
+wait 60
+expect trk8 3
+press OCT-
+wait 800
+release OCT-
+wait 100
+expect trk8 0
+expect loop_own 1
+shot looper_t8_cleared.png
+# 9. no seams: a note held right across the take's end and the loop's point (the organ)
+turn PRESET 4
+wait 60
+expect sound 39
+wav looper_seam.wav
+tap OCT+
+wait 60
+wait 1500
+key 7 down 100
+wait 2900
+key 7 up
+wait 300
+expect loop_layers 1
+wait 6000
+wavstop
+turn PRESET -4
+wait 60
+# 3. the transport stopped under a take: the take is dropped; the loop waits and starts again with the pattern
+tap OCT+
+wait 2100
+expect loop_state 2
+tap PLAY
+wait 100
+expect loop_state 0
+expect loop_layers 1
+wait 400
+peakreset
+wait 500
+expect peak_db_max -50
+tap PLAY
+wait 300
+peakreset
+wait 1500
+expect peak_db_min -40
+# 6. on the step page a take records the steps of the track on it (the kick), not the other tracks' steps
+press OCT-
+wait 800
+release OCT-
+wait 200
+expect loop_has 0
+turn ALGO -4
+wait 60
+expect track 1
+tap SEQ
+wait 60
+expect page 1
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w12
+tap OCT+
+wait 4300
+expect loop_layers 1
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w12
+tap SEQ
+wait 60
+expect page 0
+wav looper_steps_recorded.wav
+wait 300
+peakreset
+wait 2100
+expect peak_db_min -30
+wavstop
+# 7. a pattern too long for a block at 22 kHz: said before the take, and the loop is at 11 kHz, with its undo
+press OCT-
+wait 800
+release OCT-
+wait 200
+expect loop_has 0
+turn ALGO 4
+wait 60
+expect track 5
+expect loop_bars2 2
+tap OCT+
+wait 60
+shot looper_11khz.png
+expect loop_state 1
+wait 4100
+key 7 down 100
+wait 300
+key 7 up
+wait 4200
+expect loop_layers 1
+expect loop_khz 11
+expect loop_undo 1
+peakreset
+wait 4100
+expect peak_db_min -30
+press OCT-
+wait 800
+release OCT-
+wait 200
+expect loop_has 0
+# 7. longer still: refused, with its message, nothing recorded
+expect loop_bars3 3
+tap OCT+
+wait 60
+shot looper_too_long.png
+expect loop_state 0
+wait 300
+expect loop_state 0
+expect loop_bars1 1
+tap OCT+
+wait 4300
+expect loop_layers 1
+expect loop_khz 22
+# 8. nothing saved: a restart, and the loop is gone; the flash was never written
+expect lim_clips 0
+expect store_writes 0
+reboot
+wait 2300
+expect loop_has 0
+expect loop_mode 0
+expect loop_own 0
+expect store_writes 0
