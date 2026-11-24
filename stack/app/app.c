@@ -165,6 +165,8 @@ typedef struct {
     volatile int8_t pitch;               /* semitones, -24 .. +24 */
     volatile int8_t filt;                /* -FILT_MAX (low-pass, closed) .. 0 off .. +FILT_MAX (high-pass) */
     volatile uint8_t decay, level;       /* 0 .. 100 */
+    volatile uint8_t fx[2];              /* the effect in slot A and in slot B (fx.c FX_*) */
+    volatile int8_t fxk[2];              /* their knobs, -FX_MAX .. 0 off .. +FX_MAX */
 } track_t;
 static track_t trk[NTRK];
 static volatile uint8_t step_on[NTRK][NSTEP];
@@ -213,7 +215,7 @@ static float gain_now;
 #define LIM_UP 0.0004f                   /* and back up over ~60 ms once the level has fallen */
 #define LIM_REL 0.99991f                 /* the level's follower: ~0.25 s to fall */
 static struct {
-    float d[LIM_AHEAD];
+    float d[LIM_AHEAD], e[LIM_AHEAD];    /* left, right */
     uint32_t w;
     float env, g;
     float g_min, peak;                   /* since the last look (the tests): the lowest gain, the highest sample out */
@@ -399,13 +401,19 @@ static void seq_block(uint32_t n)
 
 #define VOICE_AMP 1.0f                   /* a voice at full velocity, before its track's LEVEL */
 static float tb[APP_BLOCK];                  /* one track's bus */
-static float mix[APP_BLOCK];
+static float mixl[APP_BLOCK], mixr[APP_BLOCK];
+#include "fx.c"                          /* the effects: two slots a track */
+_Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
 
-static void voice_render(voice_t *v, uint32_t n, float dcoef, float rcoef)
+static void voice_render(voice_t *v, uint32_t n, float dcoef, float rcoef, float rate)
 {
     uint32_t i = v->delay;
-    float frac = v->frac, inc = v->inc, env = v->env, att = v->att, amp = v->vel * v->gain * (VOICE_AMP / 32768.0f);
+    float frac = v->frac, inc = v->inc * rate, env = v->env, att = v->att;
+    /* (TAPE SPEED: the track's play rate; near a standstill the sound fades, as a stopped tape gives none) */
+    float amp = v->vel * v->gain * (VOICE_AMP / 32768.0f) * (rate * 12.0f < 1.0f ? rate * 12.0f : 1.0f);
     float s0 = v->s0, s1 = v->s1;
+    if (inc > INC_MAX)
+        inc = INC_MAX;
     v->delay = 0;
     for (; i < n; i++) {
         if (att < 1.0f)
@@ -456,14 +464,26 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
     midi_in();
     seq_block(n);
     for (i = 0; i < n; i++)
-        mix[i] = 0.0f;
+        mixl[i] = mixr[i] = 0.0f;
     for (t = 0; t < NTRK; t++) {
         const sound_t *s = list_sound(trk[t].sound);
         int32_t f = trk[t].filt;
         float kd = (float)trk[t].decay, lv = (float)trk[t].level * 0.01f;
         float dcoef = 1.0f, rcoef, a_t = 1.0f, b_t = 0.0f, g_t = lv * lv, a = bus[t].a, b = bus[t].b, g = bus[t].gain;
         float lp1 = bus[t].lp1, lp2 = bus[t].lp2, hp1 = bus[t].hp1, hp2 = bus[t].hp2;
-        uint32_t any = 0;
+        float fa[2], rate_t = 1.0f, dry = 1.0f;
+        uint32_t any = 0, ft[2], fs[2], q;
+        for (q = 0; q < 2u; q++) {               /* the two slots: what, which side, how much */
+            ft[q] = trk[t].fx[q] < NFX ? trk[t].fx[q] : FX_OFF;
+            fa[q] = fx_amount(trk[t].fxk[q], &fs[q]);
+            if (fa[q] <= 0.0f)
+                ft[q] = FX_OFF;
+            if (ft[q] == FX_TAPE)
+                rate_t *= fx_tape_target(fs[q], fa[q]);
+        }
+        tape_rate[t] += (rate_t - tape_rate[t]) * 0.04f;     /* a tape's weight: ~0.15 s to get there */
+        if (rate_t == 0.0f && tape_rate[t] < 0.002f)
+            tape_rate[t] = 0.0f;
         /* DECAY: a hit fades over 20 ms .. 1.9 s (100: not at all); a held sound lets go over 10 ms .. 1 s */
         if (s && (s->flags & SF_DRUM) && kd < 100.0f)
             dcoef = fm_expf(-1.0f / (0.020f * fm_exp2f(kd * 0.066f) * 44100.0f));
@@ -477,7 +497,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             tb[i] = 0.0f;
         for (k = 0; k < NVOICE; k++)
             if (voice[k].state != V_OFF && voice[k].track == t) {
-                voice_render(&voice[k], n, dcoef, rcoef);
+                voice_render(&voice[k], n, dcoef, rcoef, tape_rate[t]);
                 any = 1;
                 on++;
             }
@@ -492,15 +512,28 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             float x = tb[i];
             a += (a_t - a) * 0.004f;         /* the knobs glide: no step at a block's edge */
             b += (b_t - b) * 0.004f;
-            g += (g_t - g) * 0.004f;
             lp1 += a * (x - lp1);
             lp2 += a * (lp1 - lp2);
             x = lp2;
             hp1 += b * (x - hp1);
             x -= hp1;
             hp2 += b * (x - hp2);
-            x -= hp2;
-            mix[i] += x * g;
+            tb[i] = x - hp2;
+        }
+        for (q = 0; q < 2u; q++)                 /* OVERDRIVE and LO-FI: on the track itself, slot A then B */
+            if (ft[q] == FX_DRIVE || ft[q] == FX_LOFI)
+                fx_inline(ft[q], fs[q], fa[q], &fx_slot[t][q], tb, n);
+        for (i = 0; i < n; i++) {                /* LEVEL */
+            g += (g_t - g) * 0.004f;
+            tb[i] *= g;
+        }
+        for (q = 0; q < 2u; q++)                 /* the shared effects: this track's part into their buses */
+            if (FX_BUS[ft[q]] >= 0)
+                dry *= fx_send(ft[q], fs[q], fa[q], tb, n);
+        for (i = 0; i < n; i++) {
+            float x = tb[i] * dry;
+            mixl[i] += x;
+            mixr[i] += x;
         }
         bus[t].a = a;
         bus[t].b = b;
@@ -510,30 +543,35 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         bus[t].hp1 = fm_flush(hp1);
         bus[t].hp2 = fm_flush(hp2);
     }
+    fx_buses(mixl, mixr, n, 44100.0f * 60.0f / (SEQ_BPM * 4.0f));
     voices_on = on;
     /* the master's limiter: the mix is held back LIM_AHEAD frames, so the gain is already down when a peak comes out.
      * The level's follower rises at once and falls over ~0.25 s; under LIM_T nothing is touched (gain 1) */
-    for (i = 0; i < n; i++) {
-        float x = mix[i], a = fm_fabsf(x), want, s;
+    for (i = 0; i < n; i++) {                    /* (left and right share the one gain: the picture stays put) */
+        float xl = mixl[i], xr = mixr[i], a = fm_fabsf(xl) > fm_fabsf(xr) ? fm_fabsf(xl) : fm_fabsf(xr), want, sl, sr;
         lim.env = a > lim.env ? a : lim.env * LIM_REL;
         want = lim.env > LIM_T ? LIM_T / lim.env : 1.0f;
         lim.g += (want - lim.g) * (want < lim.g ? LIM_ATK : LIM_UP);
-        s = lim.d[lim.w];
-        lim.d[lim.w] = x;
+        sl = lim.d[lim.w];
+        sr = lim.e[lim.w];
+        lim.d[lim.w] = xl;
+        lim.e[lim.w] = xr;
         lim.w = (lim.w + 1u) % LIM_AHEAD;
-        s *= lim.g;
+        sl *= lim.g;
+        sr *= lim.g;
         if (lim.g < lim.g_min)
             lim.g_min = lim.g;
-        if (s > 1.0f || s < -1.0f) {             /* (never, with the look-ahead: counted if it ever is) */
+        if (sl > 1.0f || sl < -1.0f || sr > 1.0f || sr < -1.0f) {   /* (never, with the look-ahead: counted if it ever is) */
             lim.clips++;
-            s = s > 0.0f ? 1.0f : -1.0f;
+            sl = fm_clampf(sl, -1.0f, 1.0f);
+            sr = fm_clampf(sr, -1.0f, 1.0f);
         }
-        if (fm_fabsf(s) > lim.peak)
-            lim.peak = fm_fabsf(s);
+        a = fm_fabsf(sl) > fm_fabsf(sr) ? fm_fabsf(sl) : fm_fabsf(sr);
+        if (a > lim.peak)
+            lim.peak = a;
         gain_now += (gain - gain_now) * 0.004f;      /* ~5 ms: turning MASTER does not click */
-        s *= gain_now;
-        lr[2 * i] = (int32_t)s;
-        lr[2 * i + 1] = (int32_t)s;
+        lr[2 * i] = (int32_t)(sl * gain_now);
+        lr[2 * i + 1] = (int32_t)(sr * gain_now);
     }
 }
 
@@ -574,6 +612,8 @@ static void defaults(void)
         trk[t].filt = 0;
         trk[t].decay = list_sound(trk[t].sound) && !(list_sound(trk[t].sound)->flags & SF_DRUM) ? 50 : 100;
         trk[t].level = 80;
+        trk[t].fx[0] = trk[t].fx[1] = FX_OFF;
+        trk[t].fxk[0] = trk[t].fxk[1] = 0;
         for (i = 0; i < NSTEP; i++) {
             step_on[t][i] = 0;
             step_note[t][i] = 60;
@@ -585,6 +625,7 @@ static uint8_t my_again;                     /* the scans after the start done s
 static uint32_t my_t0;                       /* plat_ms at the start */
 void app_init(void)
 {
+    fx_reset();
     memset(my, 0, sizeof my);                /* (a start is from nothing: the simulator's restart keeps the RAM) */
     ms.slot = -1;
     mc.slot = -1;
@@ -595,7 +636,7 @@ void app_init(void)
 }
 
 /* --------------------------------------------------------------------- UI --- */
-enum { PAGE_PLAY, PAGE_STEP };
+enum { PAGE_PLAY, PAGE_STEP, PAGE_FX };
 static struct {
     char msg[2][28];                     /* a short message over the header */
     uint32_t msg_until;
@@ -762,6 +803,32 @@ static void knob_turn(uint32_t k, int32_t e)
     track_t *t = &trk[ui.sel];
     char a[28], n[12];
     a[0] = 0;
+    if (ui.page == PAGE_FX) {                /* the effects' page: KNOB 1, 3 the effect of slot A, B; KNOB 2, 4 its knob */
+        uint32_t q = k >> 1;
+        ui.hot = (int8_t)k;
+        ui.hot_t = plat_ms();
+        if (k & 1u) {
+            t->fxk[q] = (int8_t)clamp(t->fxk[q] + e, -FX_MAX, FX_MAX);
+        } else {                             /* the list stops at its ends; the screen says the old and the new */
+            int32_t old = t->fx[q], to = clamp(old + e, 0, (int32_t)NFX - 1);
+            if (to != old) {
+                t->fx[q] = (uint8_t)to;
+                text_cat(a, q ? "B: " : "A: ");
+                text_cat(a, FX_NAME[old]);
+                {
+                    char m[20];
+                    m[0] = 0;
+                    text_cat(m, "> ");
+                    text_cat(m, FX_NAME[to]);
+                    app_say(a, m);
+                }
+            } else {
+                app_say(e < 0 ? "START OF LIST" : "END OF LIST", "");
+            }
+        }
+        ui.redraw = 1;
+        return;
+    }
     if (ui.page == PAGE_STEP && ui.held_step >= 0) {
         if (k == 0u) {                       /* a step held, KNOB 1: its note; the step is set */
             uint32_t s = (uint32_t)ui.held_step;
@@ -875,13 +942,14 @@ static void input(void)
         } else if (k == B_PLAY) {
             seq_play_req = (uint8_t)!seq_play_req;
             app_say(seq_play_req ? "PLAY" : "STOP", "");
-        } else if (k == B_SEQ) {
-            ui.page = ui.page == PAGE_STEP ? PAGE_PLAY : PAGE_STEP;
+        } else if (k == B_SEQ || k == B_FX) {    /* SEQ: the steps and back; FX: the effects and back */
+            uint32_t to = k == B_SEQ ? PAGE_STEP : PAGE_FX;
+            ui.page = (uint8_t)(ui.page == to ? PAGE_PLAY : to);
             ui.held_step = -1;
             for (e = 0; e < (int32_t)NKEYS; e++)        /* keys held across the change let go */
                 if (ui.keys >> e & 1u)
                     ev_put(QE_OFF, ui.trk_of[e], ui.note_of[e], 0);
-            app_say(ui.page == PAGE_STEP ? "STEP PAGE" : "TRACKS PAGE", "");
+            app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : "TRACKS PAGE", "");
         } else {
             app_say(BTN_NAME[k], "NOT IN THIS VERSION");   /* (never a silent press) */
         }
@@ -910,7 +978,7 @@ static void input(void)
 
     /* the lights: REC only while there is a sound to undo; SEQ on the step page; PLAY while playing */
     lit_btn = (ui.undo_ok ? 1u << B_REC : 0u) | (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
-              (seq_play_req ? 1u << B_PLAY : 0u);
+              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
         for (k = 0; k < 16u; k++)
             if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
@@ -939,7 +1007,7 @@ static void draw_header(void)
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
-        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : "TRACKS", C_GRAY);
+        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : "TRACKS", C_GRAY);
         t[0] = 0;
         text_cat(t, "OCT ");
         t[4] = ui.octave < 0 ? '-' : '+';
@@ -1023,6 +1091,18 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     char v[12];
     cv_begin(240, 52, C_BLACK);
     cv_rect(0, 0, 240, 1, C_LINE);
+    if (ui.page == PAGE_FX) {                /* the effects' page: what its four knobs are */
+        static const char *const FN[4] = {"K1 EFFECT", "K2 KNOB", "K3 EFFECT", "K4 KNOB"};
+        for (k = 0; k < 4u; k++) {
+            int32_t x = 4 + (int32_t)k * 59;
+            int hot = ui.hot == (int8_t)k && now - ui.hot_t < 900u;
+            cv_text(x, 3, &FONT_T, FN[k], hot ? C_WHITE : C_GRAY);
+            cv_text(x, 16, &FONT_B, k < 2u ? "A" : "B", hot ? C_WHITE : C_HI);
+        }
+        cv_text(4, 40, &FONT_T, "FX: BACK TO THE TRACKS", C_DIM);
+        cv_blit(0, 188);
+        return;
+    }
     for (k = 0; k < 4u; k++) {
         int32_t x = 4 + (int32_t)k * 59;
         int hot = ui.hot == (int8_t)k && now - ui.hot_t < 900u;
@@ -1054,6 +1134,48 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     cv_blit(0, 188);
 }
 
+/* the effects' page: the selected track's two slots, each its effect and where its knob stands */
+static void draw_fx(void)
+{
+    uint32_t q;
+    char t[28], n[8];
+    const track_t *tr = &trk[ui.sel];
+    for (q = 0; q < 2u; q++) {
+        uint32_t type = tr->fx[q] < NFX ? tr->fx[q] : FX_OFF, side;
+        int32_t kv = tr->fxk[q], c = 120, p = c + kv * 104 / FX_MAX;
+        float a = fx_amount(kv, &side);
+        cv_begin(240, 80, C_BLACK);
+        if (!q) {                                /* whose effects these are */
+            trk_text(ui.sel, n);
+            cv_text(6, 2, &FONT_B, n, C_ORANGE);
+            list_name(tr->sound, t);
+            cv_text(40, 2, &FONT_S, t, C_WHITE);
+        }
+        cv_text(6, 24, &FONT_M, q ? "B" : "A", type ? C_ORANGE : C_DIM);
+        cv_text(30, 28, &FONT_B, FX_NAME[type], type ? C_WHITE : C_DIM);
+        t[0] = 0;                                /* the knob in words: OFF, or its side and how far */
+        if (!type || a <= 0.0f) {
+            text_cat(t, "OFF");
+        } else {
+            text_cat(t, FX_SIDE[type][side]);
+            text_cat(t, " ");
+            int_text((int32_t)(a * 50.0f + 0.5f), n);
+            text_cat(t, n);
+        }
+        cv_text(234 - text_w(&FONT_B, t), 28, &FONT_B, t, type && a > 0.0f ? C_HI : C_DIM);
+        if (type) {                              /* the knob's line: the two sides named, the off zone in the middle */
+            cv_text(8, 50, &FONT_T, FX_SIDE[type][0], C_GRAY);
+            cv_text(232 - text_w(&FONT_T, FX_SIDE[type][1]), 50, &FONT_T, FX_SIDE[type][1], C_GRAY);
+            cv_rect(16, 66, 208, 1, C_DIM);
+            cv_rect(c - 7, 63, 14, 7, C_LINE);
+            if (a > 0.0f)
+                cv_rect(kv < 0 ? p : c, 65, kv < 0 ? c - p : p - c, 3, C_ORANGE);
+            cv_rect(p - 2, 60, 4, 13, a > 0.0f ? C_WHITE : C_GRAY);
+        }
+        cv_blit(0, 28 + q * 80u);
+    }
+}
+
 #define TITLE_MS 2000u                   /* the title after a start: the name and the version, large */
 static void draw_title(void)                 /* in the tracks' place; the keys, the knobs and the header work meanwhile */
 {
@@ -1071,6 +1193,8 @@ static void draw(void)
     draw_header();
     if (ui.title)
         draw_title();
+    else if (ui.page == PAGE_FX)
+        draw_fx();
     else if (ui.page == PAGE_STEP)
         draw_steps();
     else
@@ -1271,6 +1395,43 @@ int app_expect(const char *what, int *got)
         *got = rx.on;
     else if (!strncmp(what, "trk", 3) && what[3] >= '1' && what[3] <= '8')  /* trkN: track N's place in the list */
         *got = trk[what[3] - '1'].sound;
+    else if (!strcmp(what, "fxa") || !strcmp(what, "fxb"))       /* the selected track's effect in slot A, B */
+        *got = trk[ui.sel].fx[what[2] - 'a'];
+    else if (!strcmp(what, "fxak") || !strcmp(what, "fxbk"))     /* and its knob */
+        *got = trk[ui.sel].fxk[what[2] - 'a'];
+    else if (!strcmp(what, "fx_awake")) {    /* the effects' buses that run now */
+        uint32_t b;
+        for (*got = 0, b = 0; b < NBUS; b++)
+            *got += fxb[b].awake;
+    }
+    else if (!strcmp(what, "bench_fx")) {    /* host only: microseconds a block, every voice busy and every bus fed */
+        static int32_t out[2 * APP_BLOCK];
+        static const uint8_t TA[8] = {FX_DELAY, FX_ECHO, FX_REVERB, FX_ROBOT, FX_FLANGER, FX_CHORUS, FX_DRIVE, FX_LOFI};
+        uint32_t i, k, t;
+        clock_t t0;
+        track_t save[NTRK];
+        memcpy(save, trk, sizeof save);
+        for (t = 0; t < NTRK; t++) {             /* each track: one effect to the left in A, the same to the right in B */
+            trk[t].sound = (uint8_t)(35u + t);
+            trk[t].fx[0] = trk[t].fx[1] = TA[t];
+            trk[t].fxk[0] = -FX_MAX;
+            trk[t].fxk[1] = FX_MAX;
+        }
+        t0 = clock();
+        for (i = 0; i < 4000u; i++) {
+            for (k = 0; k < NVOICE; k++)
+                if (voice[k].state == V_OFF)
+                    voice_start(k % NTRK, 60, 127, 0, 0, 0);
+            render_part(out, APP_BLOCK, 8300000.0f);
+        }
+        *got = (int)((double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 4000.0 * 10.0);
+        printf("  bench_fx: %.1f us a block of %u frames, %u voices, 12 buses and 4 track effects (this computer, not an FM-1)\n",
+               *got / 10.0, (unsigned)APP_BLOCK, (unsigned)NVOICE);
+        for (i = 0; i < NVOICE; i++)
+            voice[i].state = V_OFF;
+        memcpy(trk, save, sizeof save);
+        fx_reset();
+    }
     else if (!strcmp(what, "cat"))           /* the selected track's sound's category (0 DRUMS .. 5 FX), -1 none */
         *got = list_sound(trk[ui.sel].sound) ? list_sound(trk[ui.sel].sound)->cat : -1;
     else if (!strncmp(what, "bench", 5)) {   /* host only: microseconds a block with every voice busy: "bench" three

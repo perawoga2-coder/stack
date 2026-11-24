@@ -8,6 +8,7 @@ STACK is under the Mozilla Public License 2.0 (MPL-2.0), file by file: each sour
 | `base/` | [fm1-base](https://github.com/charlesvestal/fm1-base) at `2bb8e74` with [felucca-bsp](https://github.com/hugelton/felucca-bsp) at `2bd9dbe` (`BASE_COMMITS.txt`), unchanged. In the repository it is to be a git submodule | MPL-2.0; its own third-party parts in `base/LICENSING.md` |
 | The built-in sounds (`app/sounds_data.h`, made by `tools/make_sounds.py` from `tools/sounds.json`) | each sound's source is in `app/SOUNDS.md` | Maker Hip's own, CC0 1.0, and audio rendered from Felucca's presets (credit: Felucca by Leo Kuroshita, Hügelton Instruments) |
 | `app/my_samples.c`: the samples the Burger Studio app sends (the messages, the slots in the flash, their loudness) | written for STACK from the app's own side of the protocol (Maker Hip's `Fm1SampleLink.kt`); no code from Felucca or the Burger Studio firmware | MPL-2.0 |
+| `app/fx.c`: the effects | written for STACK; ROBOT follows the idea of the Burger Studio app's own `RobotFx` (Maker Hip's `Robot.kt`) | MPL-2.0 |
 | The IMA ADPCM decoder in `app/app.c` and the encoder in `tools/make_sounds.py` | written for STACK from the IMA standard (its two tables and its algorithm) | MPL-2.0 (the code) |
 
 Rules this project keeps:

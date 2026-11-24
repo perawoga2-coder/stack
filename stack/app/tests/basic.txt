@@ -185,7 +185,7 @@ shot play_page.png
 wait 1800
 shot play_idle.png
 # a button with no job says so
-tap FX
+tap ENV
 wait 40
 shot not_yet.png
 # one sound at a time never reaches the limiter

@@ -1,0 +1,656 @@
+# STACK in the host simulator: the effects' page (FX). Two slots a track; each an effect and one knob.
+#   app/build/host/stack_host app/tests/fx.txt app/build/host
+master 4096
+wait 2200
+turn ALGO 4
+wait 30
+expect track 5
+expect sound 35
+# FX opens the page and goes back; SEQ from it goes to the steps
+tap FX
+wait 60
+expect page 2
+shot fx_off.png
+leds
+tap FX
+wait 60
+expect page 0
+tap FX
+wait 60
+tap SEQ
+wait 60
+expect page 1
+tap FX
+wait 60
+expect page 2
+# the list stops at its ends: OFF .. LO-FI
+turn K1 -3
+wait 40
+expect fxa 0
+turn K1 30
+wait 40
+expect fxa 9
+turn K1 -30
+wait 40
+expect fxa 0
+# the knob stops at its ends; the middle is off (seven detents)
+turn K1 1
+wait 30
+expect fxa 1
+turn K2 3
+wait 30
+expect fxak 3
+expect fx_awake 0
+key 7 down 100
+wait 200
+key 7 up
+wait 400
+expect fx_awake 0
+turn K2 90
+wait 30
+expect fxak 53
+turn K2 -200
+wait 30
+expect fxak -53
+turn K2 53
+wait 30
+expect fxak 0
+# slot B is the track's own too, and another track has its own
+turn K3 3
+turn K4 -20
+wait 30
+expect fxb 3
+expect fxbk -20
+turn ALGO -1
+wait 30
+expect track 4
+expect fxa 0
+expect fxb 0
+expect fxbk 0
+turn ALGO 1
+wait 30
+expect fxa 1
+expect fxb 3
+turn K3 -3
+turn K4 20
+wait 30
+expect fxb 0
+# REC is still the undo of a sound change only
+expect undo 0
+tap REC
+wait 40
+expect fxa 1
+turn K1 -1
+wait 40
+expect fxa 0
+wav fx_dry.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+# every effect at both ends: three notes of the PIANO, then its tail. Nothing clips; the limiter holds it
+turn K1 1
+wait 40
+expect fxa 1
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_delay_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+shot fx_delay_right.png
+wav fx_delay_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 2
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_echo_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_echo_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 3
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_reverb_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_reverb_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 4
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_tape_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_tape_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 5
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_robot_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_robot_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 6
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_flanger_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_flanger_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 7
+turn K2 -53
+wait 60
+expect fxak -53
+shot fx_overdrive_left.png
+wav fx_overdrive_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_overdrive_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 8
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_chorus_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_chorus_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+turn K1 1
+wait 40
+expect fxa 9
+turn K2 -53
+wait 60
+expect fxak -53
+wav fx_lofi_left.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 53
+wait 60
+expect fxak 0
+wait 3500
+turn K2 53
+wait 60
+expect fxak 53
+wav fx_lofi_right.wav
+key 7 down 100
+wait 380
+key 7 up
+wait 120
+key 11 down 100
+wait 380
+key 11 up
+wait 120
+key 14 down 100
+wait 380
+key 14 up
+wait 120
+wait 2500
+wavstop
+expect lim_clips 0
+expect lim_peak <900
+turn K2 -53
+wait 60
+expect fxak 0
+wait 3500
+# once the knob is back in the middle and the tails are gone, no bus runs
+wait 12000
+expect fx_awake 0
+# two effects at once on a track, and effects on drums while the steps play
+turn K1 -9
+wait 30
+turn K1 3
+turn K2 53
+turn K3 8
+turn K4 -40
+wait 60
+expect fxa 3
+expect fxb 8
+shot fx_two.png
+turn ALGO -4
+wait 30
+expect track 1
+turn K1 2
+turn K2 40
+turn K3 7
+turn K4 53
+wait 30
+tap SEQ
+wait 60
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w10
+tapkey w12
+tap SEQ
+wait 60
+wav fx_drums_echo_fuzz.wav
+tap PLAY
+wait 4000
+tap PLAY
+wait 3000
+wavstop
+expect lim_clips 0
+# TAPE SPEED to the far left stops the tape: silence while it is there, the sound again when it comes back
+tap FX
+wait 60
+turn ALGO 4
+wait 30
+turn K1 -3
+turn K3 -8
+wait 30
+turn K1 4
+turn K2 53
+turn K2 -106
+wait 2000
+expect fxa 4
+expect fxak -53
+turn K2 53
+wait 1500
+expect fxak 0
+# the tape stopped by hand while a note sounds: the knob turned to the far left in steps
+turn PRESET 4
+wait 60
+expect sound 39
+wav fx_tape_stop_by_hand.wav
+key 7 down 100
+wait 500
+turn K2 -14
+wait 150
+turn K2 -10
+wait 150
+turn K2 -10
+wait 150
+turn K2 -10
+wait 150
+turn K2 -9
+wait 900
+key 7 up
+wait 300
+wavstop
+expect fxak -53
+turn PRESET -4
+wait 60
+expect sound 35
+# and with the tape stopped a key gives nothing
+wav fx_tape_stopped.wav
+peakreset
+key 7 down 100
+wait 500
+key 7 up
+wait 300
+wavstop
+expect peak_db_max -40
+turn K2 53
+wait 800
+expect bench_fx >0
+expect bench_mid >0
+expect lim_clips 0
+expect store_writes 0
