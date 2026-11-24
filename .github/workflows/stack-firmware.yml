@@ -42,12 +42,12 @@ jobs:
         run: |
           cd stack
           base/.venv/bin/python base/tools/build.py app --host
-          app/build/host/stack_host app/tests/basic.txt app/build/host
+          for t in basic limiter sounds; do app/build/host/stack_host app/tests/$t.txt app/build/host; done
 
       - name: Build
         id: b
         run: |
-          VER=0.1.0-test
+          VER=$(tr -d ' \r\n' < stack/VERSION)   # the version is stack/VERSION, nowhere else
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
           cd stack
           base/.venv/bin/python base/tools/build.py app --release "$VER"

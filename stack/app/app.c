@@ -3,7 +3,7 @@
  * Started from fm1-base's template/app.c, Copyright (C) 2026 Charles Vestal (MPL-2.0): the unity build's shape,
  * app_say, the key scan with velocity and the text helpers follow it. Nothing here comes from Felucca or from the
  * Burger Studio firmware (bs19); the sounds are audio only (app/SOUNDS.md). */
-/* STACK 0.1.0-test. Eight tracks, each with one sound picked from a single list; the keys play the selected track.
+/* STACK. Eight tracks, each with one sound picked from a single list; the keys play the selected track.
  *   ALGORITHM  the track, 1..8 (it stops at the ends)
  *   PRESETS    the selected track's sound, from one list that stops at its ends; nothing else changes
  *   REC        UNDO SOUND: the sound the track had before the last turn of PRESETS (lit while there is one)
@@ -14,20 +14,37 @@
  * Part of the unity build (device/unity.c, host/plat_host.c), after the platform: gfx.c and announce.c are in scope. */
 #include "fastmath.h"
 
-#define STACK_VERSION "0.1.0-TEST"
+#ifndef APP_VERSION
+#define APP_VERSION "DEV"                /* (a release build's -DAPP_VERSION: stack/VERSION, through the workflow) */
+#endif
 
 /* ------------------------------------------------------------------ sounds --- */
+enum { CAT_DRUMS, CAT_BASS, CAT_KEYS, CAT_PAD, CAT_LEAD, CAT_FX, NCAT };
+static const char *const CAT_NAME[NCAT] = {"DRUMS", "BASS", "KEYS", "PAD", "LEAD", "FX"};
 typedef struct {
     const char *name;
-    const int16_t *d;
-    uint32_t n, ls, le;                  /* frames; the loop [ls, le) when SF_LOOP */
+    const void *d;                       /* IMA ADPCM, 4 bits a sample, low nibble first; SF_PCM: int16_t */
+    uint32_t n, ls, le;                  /* samples; the loop [ls, le) when SF_LOOP */
     float rate, hz;                      /* its sample rate, and the pitch it sounds at that rate */
-    uint32_t flags;
+    uint16_t flags;
+    uint8_t cat;
+    int16_t lpred;                       /* ADPCM: the decoder's state as it comes to the loop's first sample */
+    uint8_t lidx;
 } sound_t;
 #define SF_LOOP 1u                       /* holds while the key is down */
 #define SF_DRUM 2u                       /* a hit: plays through, at its own pitch on every key */
-#define SF_TEMP 4u                       /* temporary: rendered audio, to be replaced after the listening test */
+#define SF_PCM 4u                        /* 16-bit PCM (a single cycle) */
 #include "sounds_data.h"
+
+/* IMA ADPCM, the standard's two tables (IMA Digital Audio Focus and Technical Working Groups, "Recommended Practices
+ * for Enhancing Digital Audio Compatibility in Multimedia Systems", 1992) */
+static const int16_t IMA_STEP[89] = {
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88,
+    97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
+    724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660,
+    4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818,
+    18500, 20350, 22385, 24623, 27086, 29794, 32767};
+static const int8_t IMA_INDEX[8] = {-1, -1, -1, -1, 2, 4, 6, 8};
 
 /* the one list PRESETS walks: EMPTY, the built-in sounds, then the three slots for samples from the app (empty in
  * this version: the app's samples come in a later one) */
@@ -76,6 +93,31 @@ static void list_name(uint32_t i, char *b)   /* "EMPTY", "ROCK KICK", "MY 1 (EMP
     }
 }
 
+static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and the sound's place in it; "MY SAMPLES" */
+{
+    const sound_t *s = list_sound(i);
+    uint32_t k, at = 0, of = 0;
+    char n[8];
+    b[0] = 0;
+    if (!s) {
+        text_cat(b, i ? "MY SAMPLES" : "");
+        return;
+    }
+    for (k = 0; k < NSOUNDS; k++)
+        if (SOUNDS[k].cat == s->cat) {
+            of++;
+            if (&SOUNDS[k] <= s)
+                at++;
+        }
+    text_cat(b, CAT_NAME[s->cat]);
+    text_cat(b, " ");
+    int_text((int32_t)at, n);
+    text_cat(b, n);
+    text_cat(b, "/");
+    int_text((int32_t)of, n);
+    text_cat(b, n);
+}
+
 /* ------------------------------------------------------------------ tracks --- */
 #define NTRK 8u
 #define NSTEP 16u
@@ -104,7 +146,12 @@ static uint32_t seq_next;                /* the step that starts then */
 enum { V_OFF, V_HELD, V_REL };
 typedef struct {
     const sound_t *s;
-    float pos, inc, env, att, vel;
+    float frac, inc, env, att, vel;      /* frac: how far between s0 and s1 */
+    float s0, s1;                        /* the two samples it is between */
+    uint32_t ni;                         /* the next sample to fetch */
+    int32_t pred;                        /* ADPCM: the decoder */
+    int32_t idx;
+    uint8_t done;                        /* a one-shot: its last sample has been fetched */
     uint32_t delay;                      /* frames into this block before it starts */
     uint32_t life;                       /* a preview: frames until it lets go (0: none) */
     uint32_t age;
@@ -119,6 +166,20 @@ static struct {
     float lp1, lp2, hp1, hp2, a, b, gain;
 } bus[NTRK];
 static float gain_now;
+
+/* the master's limiter (render_part) */
+#define LIM_AHEAD 48u                    /* frames the mix is held back: 1.1 ms */
+#define LIM_T 0.89f                      /* -1 dBFS: nothing above it goes out */
+#define LIM_ATK 0.2f                     /* the gain comes down within the look-ahead (0.8^48: 0.00002 left) */
+#define LIM_UP 0.0004f                   /* and back up over ~60 ms once the level has fallen */
+#define LIM_REL 0.99991f                 /* the level's follower: ~0.25 s to fall */
+static struct {
+    float d[LIM_AHEAD];
+    uint32_t w;
+    float env, g;
+    float g_min, peak;                   /* since the last look (the tests): the lowest gain, the highest sample out */
+    uint32_t clips;
+} lim = {.g = 1.0f, .g_min = 1.0f};
 
 /* notes from the main loop to the audio interrupt: track | note << 8 | velocity << 16 | kind << 24 */
 enum { QE_ON = 1, QE_OFF, QE_PING };
@@ -135,6 +196,44 @@ static void ev_put(uint32_t kind, uint32_t t, uint32_t note, uint32_t vel)
 }
 
 static float semis(float st) { return fm_exp2f(st * (1.0f / 12.0f)); }
+
+#define INC_MAX 4.0f                     /* at most four samples of a sound a frame: two octaves above its own rate */
+
+/* the voice's next sample (ni), decoded if it is ADPCM; a loop goes round, a one-shot ends on zeros */
+static float voice_fetch(voice_t *v)
+{
+    const sound_t *s = v->s;
+    uint32_t i = v->ni;
+    if (s->flags & SF_LOOP) {
+        if (i >= s->le) {
+            i = s->ls;
+            v->pred = s->lpred;
+            v->idx = s->lidx;
+        }
+    } else if (i >= s->n) {
+        v->done = 1;
+        return 0.0f;
+    }
+    v->ni = i + 1u;
+    if (s->flags & SF_PCM)
+        return (float)((const int16_t *)s->d)[i];
+    {
+        uint32_t code = (((const uint8_t *)s->d)[i >> 1] >> ((i & 1u) << 2)) & 15u;
+        int32_t step = IMA_STEP[v->idx], d = step >> 3, p = v->pred;
+        if (code & 4u)
+            d += step;
+        if (code & 2u)
+            d += step >> 1;
+        if (code & 1u)
+            d += step >> 2;
+        p = code & 8u ? p - d : p + d;
+        p = p > 32767 ? 32767 : p < -32768 ? -32768 : p;
+        v->pred = p;
+        d = v->idx + IMA_INDEX[code & 7u];
+        v->idx = d < 0 ? 0 : d > 88 ? 88 : d;
+        return (float)p;
+    }
+}
 
 static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay, uint32_t seq, uint32_t life)
 {
@@ -159,10 +258,16 @@ static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay,
     if (!(s->flags & SF_DRUM))           /* a key's pitch against the sound's own */
         st += 12.0f * fm_log2f(440.0f / s->hz) + (float)((int32_t)note - 69);
     v->s = s;
-    v->pos = 0.0f;
     v->inc = s->rate * (1.0f / 44100.0f) * semis(st);
-    if (v->inc > 16.0f)
-        v->inc = 16.0f;
+    if (v->inc > INC_MAX)                /* (the decoder's work a frame is bounded: no higher than this) */
+        v->inc = INC_MAX;
+    v->ni = 0;
+    v->pred = 0;
+    v->idx = 0;
+    v->done = 0;
+    v->frac = 0.0f;
+    v->s0 = voice_fetch(v);
+    v->s1 = voice_fetch(v);
     v->env = 1.0f;
     v->att = 0.0f;
     v->vel = 0.25f + 0.75f * (float)vel * (1.0f / 127.0f);
@@ -235,46 +340,37 @@ static void seq_block(uint32_t n)
     seq_left -= (float)n;
 }
 
+#define VOICE_AMP 1.0f                   /* a voice at full velocity, before its track's LEVEL */
 static float tb[APP_BLOCK];                  /* one track's bus */
 static float mix[APP_BLOCK];
 
 static void voice_render(voice_t *v, uint32_t n, float dcoef, float rcoef)
 {
-    const sound_t *s = v->s;
-    const int16_t *d = s->d;
-    uint32_t i = v->delay, loop = s->flags & SF_LOOP;
-    float pos = v->pos, inc = v->inc, env = v->env, att = v->att, amp = v->vel * (0.5f / 32768.0f);
-    float le = (float)s->le, ll = (float)(s->le - s->ls), end = (float)(s->n - 1u);
+    uint32_t i = v->delay;
+    float frac = v->frac, inc = v->inc, env = v->env, att = v->att, amp = v->vel * (VOICE_AMP / 32768.0f);
+    float s0 = v->s0, s1 = v->s1;
     v->delay = 0;
     for (; i < n; i++) {
-        uint32_t ip, iq;
-        float fr, x;
-        if (loop) {
-            while (pos >= le)
-                pos -= ll;
-        } else if (pos >= end) {
-            v->state = V_OFF;
-            break;
-        }
-        ip = (uint32_t)pos;
-        fr = pos - (float)ip;
-        iq = ip + 1u;
-        if (loop && iq >= s->le)
-            iq = s->ls;
-        x = (float)d[ip] + ((float)d[iq] - (float)d[ip]) * fr;
         if (att < 1.0f)
             att += 1.0f / 48.0f;             /* ~1 ms in: no click on a sound that starts away from zero */
         env *= v->state == V_REL ? rcoef : dcoef;
-        tb[i] += x * amp * env * (att < 1.0f ? att : 1.0f);
-        pos += inc;
+        tb[i] += (s0 + (s1 - s0) * frac) * amp * env * (att < 1.0f ? att : 1.0f);
+        frac += inc;
+        while (frac >= 1.0f) {               /* on to the next samples (INC_MAX of them at most) */
+            frac -= 1.0f;
+            s0 = s1;
+            s1 = voice_fetch(v);
+        }
         if (v->life && !--v->life && v->state == V_HELD)
             v->state = V_REL;
-        if (env < 0.0005f) {
+        if (env < 0.0005f || (v->done && s0 == 0.0f && s1 == 0.0f)) {
             v->state = V_OFF;
             break;
         }
     }
-    v->pos = pos;
+    v->frac = frac;
+    v->s0 = s0;
+    v->s1 = s1;
     v->env = env;
     v->att = att;
 }
@@ -352,10 +448,27 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         bus[t].hp2 = fm_flush(hp2);
     }
     voices_on = on;
+    /* the master's limiter: the mix is held back LIM_AHEAD frames, so the gain is already down when a peak comes out.
+     * The level's follower rises at once and falls over ~0.25 s; under LIM_T nothing is touched (gain 1) */
     for (i = 0; i < n; i++) {
-        float s;
+        float x = mix[i], a = fm_fabsf(x), want, s;
+        lim.env = a > lim.env ? a : lim.env * LIM_REL;
+        want = lim.env > LIM_T ? LIM_T / lim.env : 1.0f;
+        lim.g += (want - lim.g) * (want < lim.g ? LIM_ATK : LIM_UP);
+        s = lim.d[lim.w];
+        lim.d[lim.w] = x;
+        lim.w = (lim.w + 1u) % LIM_AHEAD;
+        s *= lim.g;
+        if (lim.g < lim.g_min)
+            lim.g_min = lim.g;
+        if (s > 1.0f || s < -1.0f) {             /* (never, with the look-ahead: counted if it ever is) */
+            lim.clips++;
+            s = s > 0.0f ? 1.0f : -1.0f;
+        }
+        if (fm_fabsf(s) > lim.peak)
+            lim.peak = fm_fabsf(s);
         gain_now += (gain - gain_now) * 0.004f;      /* ~5 ms: turning MASTER does not click */
-        s = fm_clampf(mix[i], -1.0f, 1.0f) * gain_now;
+        s *= gain_now;
         lr[2 * i] = (int32_t)s;
         lr[2 * i + 1] = (int32_t)s;
     }
@@ -384,7 +497,7 @@ void app_panic(void)
 static void defaults(void)
 {
     /* tracks 1..6 start with a built-in sound, 7 and 8 empty; the names are looked up, so the list may change */
-    static const char *const START[NTRK] = {"ROCK KICK", "ROCK SNARE", "ROCK HAT", "SUB BASS", "PIANO", "HG PLUCK", 0, 0};
+    static const char *const START[NTRK] = {"KICK ROCK", "SNARE ROCK", "HAT ROCK", "SUB BASS", "PIANO", "SAW LEAD", 0, 0};
     uint32_t t, i, k;
     for (t = 0; t < NTRK; t++) {
         trk[t].sound = 0;
@@ -425,6 +538,8 @@ static struct {
     uint8_t trk_of[NKEYS];
     int8_t hot;                          /* the knob turned last (0..3), lit for a moment */
     uint32_t hot_t;
+    uint8_t cpu;                         /* plat_cpu_pct, as drawn */
+    uint32_t cpu_t;
     uint8_t redraw;
 } ui;
 
@@ -753,6 +868,10 @@ static void draw_header(void)
         t[5] = (char)('0' + (ui.octave < 0 ? -ui.octave : ui.octave));
         t[6] = 0;
         cv_text(150, 8, &FONT_XS, t, C_GRAY);
+        t[0] = 0;                            /* the audio's share of the processor (a test version's readout) */
+        text_cat(t, "CPU ");
+        int_text((int32_t)ui.cpu, t + 4);
+        cv_text(104, 11, &FONT_T, t, ui.cpu >= 70u ? C_WHITE : C_DIM);
         cv_text(200, 8, &FONT_XS, seq_play_req ? "PLAY" : "STOP", seq_play_req ? C_HI : C_DIM);
     }
     cv_rect(0, 27, 240, 1, C_LINE);
@@ -848,6 +967,11 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
         }
     }
     cv_text(4, 40, &FONT_T, ui.undo_ok ? "REC: UNDO SOUND" : "ALGO: TRACK  PRESETS: SOUND", ui.undo_ok ? C_WHITE : C_DIM);
+    {                                        /* where the track's sound is in the list: its category and place there */
+        char c[20];
+        cat_text(t->sound, c);
+        cv_text(236 - text_w(&FONT_T, c), 40, &FONT_T, c, C_GRAY);
+    }
     cv_blit(0, 188);
 }
 
@@ -870,7 +994,7 @@ void app_ui_init(void)
     ui.hot = -1;
     ui_sel_isr = ui.sel;
     ui.redraw = 1;
-    app_say("STACK", STACK_VERSION);
+    app_say("STACK", APP_VERSION);
 }
 
 void app_frame(void)
@@ -889,6 +1013,14 @@ void app_frame(void)
     }
     if (ui.undo_ok && now - ui.undo_t >= 1500u && now - ui.undo_t < 1600u)
         ui.redraw = 1;
+    if (now - ui.cpu_t >= 500u) {            /* the CPU readout, twice a second */
+        uint32_t c = plat_cpu_pct();
+        ui.cpu_t = now;
+        if (c != ui.cpu) {
+            ui.cpu = (uint8_t)(c > 255u ? 255u : c);
+            ui.redraw = 1;
+        }
+    }
     if (seq_play_req != last_play || (ui.page == PAGE_STEP && seq_play_req && seq_step_now != last_step)) {
         last_play = seq_play_req;
         last_step = seq_step_now;
@@ -927,6 +1059,42 @@ int app_expect(const char *what, int *got)
         *got = seq_play_req;
     else if (!strcmp(what, "voices"))
         *got = (int)voices_on;
+    else if (!strcmp(what, "lim_gr")) {      /* the limiter's deepest gain reduction since the last look, in 0.1 dB */
+        *got = (int)(-200.0f * fm_log2f(lim.g_min) * 0.30103f + 0.5f);
+        printf("  limiter: deepest gain reduction %.1f dB\n", (double)(-20.0f * fm_log2f(lim.g_min) * 0.30103f));
+        lim.g_min = 1.0f;
+    } else if (!strcmp(what, "lim_peak")) {  /* the highest sample out since the last look, in 0.1 % of full scale */
+        *got = (int)(lim.peak * 1000.0f + 0.5f);
+        printf("  limiter: highest sample out %.3f of full scale\n", (double)lim.peak);
+        lim.peak = 0.0f;
+    } else if (!strcmp(what, "lim_clips"))   /* samples the limiter let past full scale (never) */
+        *got = (int)lim.clips;
+    else if (!strcmp(what, "cat"))           /* the selected track's sound's category (0 DRUMS .. 5 FX), -1 none */
+        *got = list_sound(trk[ui.sel].sound) ? list_sound(trk[ui.sel].sound)->cat : -1;
+    else if (!strncmp(what, "bench", 5)) {   /* host only: microseconds a block with every voice busy: "bench" three
+                                              * octaves up (the decoder's most work), "bench_mid" at the sound's own pitch */
+        uint32_t bn = what[5] ? 60u : 96u;
+        static int32_t out[2 * APP_BLOCK];
+        uint32_t i, k, save = trk[0].sound;
+        clock_t t0;
+        for (k = 1; k <= NSOUNDS && (SOUNDS[k - 1].flags & (SF_PCM | SF_DRUM)) != 0; k++)
+            ;
+        trk[0].sound = (uint8_t)k;           /* the first ADPCM sound that is not a drum */
+        for (i = 0; i < NVOICE; i++)
+            voice_start(0, bn, 127, 0, 0, 0);
+        t0 = clock();
+        for (i = 0; i < 4000u; i++) {
+            for (k = 0; k < NVOICE; k++)
+                if (voice[k].state == V_OFF)
+                    voice_start(0, bn, 127, 0, 0, 0);
+            render_part(out, APP_BLOCK, 8300000.0f);
+        }
+        *got = (int)((double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 4000.0 * 10.0);   /* 0.1 us */
+        printf("  %s: %.1f us a block of %u frames, %u voices (this computer, not an FM-1)\n", what, *got / 10.0, (unsigned)APP_BLOCK, (unsigned)NVOICE);
+        for (i = 0; i < NVOICE; i++)
+            voice[i].state = V_OFF;
+        trk[0].sound = (uint8_t)save;
+    }
     else if (!strncmp(what, "step", 4))      /* stepN: step N (1..16) of the selected track, 0 off or its note */
         *got = step_on[ui.sel][(atoi(what + 4) - 1) & 15] ? step_note[ui.sel][(atoi(what + 4) - 1) & 15] : 0;
     else

@@ -1,11 +1,11 @@
-# STACK 0.1.0-test in the host simulator: base/tools/build.py app --host, then
+# STACK in the host simulator: base/tools/build.py app --host, then
 #   app/build/host/stack_host app/tests/basic.txt app/build/host
 master 4096
 wait 600
 shot boot.png
 expect track 1
 expect sound 1
-expect nlist 23
+expect nlist 82
 expect undo 0
 # power on, press a key, hear track 1 at once (a drum: every key the same hit)
 wav t1_kick.wav
@@ -16,6 +16,7 @@ key 7 up
 wait 500
 wavstop
 expect peak_db_min -30
+expect lim_gr 0
 # ALGORITHM: one detent a track, stops at 1 and 8
 turn ALGO -3
 wait 30
@@ -52,7 +53,7 @@ wait 40
 turn PRESET 1
 wait 40
 shot sound_change.png
-expect sound 19
+expect sound 37
 expect undo 1
 expect pitch 5
 expect level 70
@@ -60,7 +61,7 @@ leds
 tap REC
 wait 40
 shot undo.png
-expect sound 17
+expect sound 35
 expect undo 0
 leds
 tap REC
@@ -69,22 +70,23 @@ turn K1 -5
 turn K4 10
 wait 30
 # the list stops at its ends
-turn PRESET 40
+turn PRESET 90
 wait 40
-expect sound 22
+expect sound 81
 turn PRESET 1
 wait 40
-expect sound 22
-turn PRESET -60
+expect sound 81
+turn PRESET -120
 wait 40
 expect sound 0
 turn PRESET -1
 wait 40
 expect sound 0
 wait 1700
-turn PRESET 17
+turn PRESET 35
 wait 40
-expect sound 17
+expect sound 35
+expect cat 2
 # FILTER: off in the middle (seven detents), then low-pass left, high-pass right
 turn K2 3
 wait 30
@@ -183,4 +185,6 @@ shot play_page.png
 tap FX
 wait 40
 shot not_yet.png
+# one sound at a time never reaches the limiter
+expect lim_clips 0
 expect store_writes 0

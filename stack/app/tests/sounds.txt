@@ -1,0 +1,560 @@
+# STACK in the host simulator: every built-in sound in the list's order, middle C, the same velocity: all_sounds.wav.
+#   app/build/host/stack_host app/tests/sounds.txt app/build/host
+master 4096
+wait 600
+turn ALGO 6
+wait 20
+expect track 7
+expect sound 0
+turn K3 -50
+wait 20
+wav all_sounds.wav
+turn PRESET 1
+wait 30
+expect sound 1
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 2
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 3
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 4
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 5
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 6
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 7
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 8
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 9
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 10
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 11
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 12
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 13
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 14
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 15
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 16
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 17
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 18
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 19
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 20
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 21
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 22
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 23
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 24
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 25
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 26
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 27
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 28
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 29
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 30
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 31
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 32
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 33
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 34
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 35
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 36
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 37
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 38
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 39
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 40
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 41
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 42
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 43
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 44
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 45
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 46
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 47
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 48
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 49
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 50
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 51
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 52
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 53
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 54
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 55
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 56
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 57
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 58
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 59
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 60
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 61
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 62
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 63
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 64
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 65
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 66
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 67
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 68
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 69
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 70
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 71
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 72
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 73
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 74
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 75
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 76
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 77
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+turn PRESET 1
+wait 30
+expect sound 78
+key w4 down 100
+wait 450
+key w4 up
+wait 350
+wavstop
+expect lim_clips 0
+shot last_sound.png

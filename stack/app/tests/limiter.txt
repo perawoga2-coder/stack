@@ -1,0 +1,196 @@
+# STACK in the host simulator: all eight tracks loud at once, through the master's limiter.
+#   app/build/host/stack_host app/tests/limiter.txt app/build/host
+master 4096
+wait 600
+tap SEQ
+wait 40
+expect track 1
+expect sound 1
+turn K4 20
+wait 20
+expect level 100
+tapkey w0
+tapkey w4
+tapkey w8
+tapkey w12
+turn ALGO 1
+wait 20
+expect track 2
+expect sound 3
+turn K4 20
+wait 20
+expect level 100
+tapkey w4
+tapkey w12
+turn ALGO 1
+wait 20
+expect track 3
+expect sound 5
+turn K4 20
+wait 20
+expect level 100
+tapkey w0
+tapkey w1
+tapkey w2
+tapkey w3
+tapkey w4
+tapkey w5
+tapkey w6
+tapkey w7
+tapkey w8
+tapkey w9
+tapkey w10
+tapkey w11
+tapkey w12
+tapkey w13
+tapkey w14
+tapkey w15
+turn ALGO 1
+wait 20
+expect track 4
+expect sound 25
+turn K4 20
+wait 20
+expect level 100
+tapkey w0
+tapkey w1
+tapkey w2
+tapkey w3
+tapkey w4
+tapkey w5
+tapkey w6
+tapkey w7
+tapkey w8
+tapkey w9
+tapkey w10
+tapkey w11
+tapkey w12
+tapkey w13
+tapkey w14
+tapkey w15
+turn ALGO 1
+wait 20
+turn PRESET 5
+wait 30
+expect track 5
+expect sound 40
+turn K4 20
+wait 20
+expect level 100
+tapkey w0
+tapkey w1
+tapkey w2
+tapkey w3
+tapkey w4
+tapkey w5
+tapkey w6
+tapkey w7
+tapkey w8
+tapkey w9
+tapkey w10
+tapkey w11
+tapkey w12
+tapkey w13
+tapkey w14
+tapkey w15
+turn ALGO 1
+wait 20
+expect track 6
+expect sound 60
+turn K4 20
+wait 20
+expect level 100
+tapkey w0
+tapkey w1
+tapkey w2
+tapkey w3
+tapkey w4
+tapkey w5
+tapkey w6
+tapkey w7
+tapkey w8
+tapkey w9
+tapkey w10
+tapkey w11
+tapkey w12
+tapkey w13
+tapkey w14
+tapkey w15
+turn ALGO 1
+wait 20
+turn PRESET 51
+wait 30
+expect track 7
+expect sound 51
+turn K4 20
+wait 20
+expect level 100
+tapkey w0
+tapkey w1
+tapkey w2
+tapkey w3
+tapkey w4
+tapkey w5
+tapkey w6
+tapkey w7
+tapkey w8
+tapkey w9
+tapkey w10
+tapkey w11
+tapkey w12
+tapkey w13
+tapkey w14
+tapkey w15
+turn ALGO 1
+wait 20
+turn PRESET 65
+wait 30
+expect track 8
+expect sound 65
+turn K4 20
+wait 20
+expect level 100
+tapkey w0
+tapkey w1
+tapkey w2
+tapkey w3
+tapkey w4
+tapkey w5
+tapkey w6
+tapkey w7
+tapkey w8
+tapkey w9
+tapkey w10
+tapkey w11
+tapkey w12
+tapkey w13
+tapkey w14
+tapkey w15
+expect lim_gr 0
+expect lim_peak 0
+wav all_tracks_loud.wav
+tap PLAY
+wait 4000
+shot limiter_playing.png
+tap PLAY
+wait 600
+wavstop
+expect lim_clips 0
+expect lim_gr >10
+expect lim_peak <900
+expect peak_db_min -3
+# and one hit alone afterwards: the limiter has let go (no pumping left)
+wait 1500
+turn ALGO -7
+wait 20
+tap SEQ
+wait 40
+expect lim_gr 0
+key 7 down 100
+wait 80
+key 7 up
+wait 400
+expect lim_gr 0
+expect lim_clips 0
+expect bench_mid >0
+expect bench >0

@@ -6,7 +6,8 @@ STACK is under the Mozilla Public License 2.0 (MPL-2.0), file by file: each sour
 | --- | --- | --- |
 | `app/app.c`, `app/app.h`, `app/fm1.toml`, `app/words.tsv`, `app/tests/`, `tools/make_sounds.py` | Maker Hip. `app.c` and `app.h` were started from fm1-base's `template/` (Copyright (C) 2026 Charles Vestal) | MPL-2.0 |
 | `base/` | [fm1-base](https://github.com/charlesvestal/fm1-base) at `2bb8e74` with [felucca-bsp](https://github.com/hugelton/felucca-bsp) at `2bd9dbe` (`BASE_COMMITS.txt`), unchanged. In the repository it is to be a git submodule | MPL-2.0; its own third-party parts in `base/LICENSING.md` |
-| The built-in sounds (`app/sounds_data.h`) | see `app/SOUNDS.md` | Maker Hip's own, CC0 1.0, and rendered audio |
+| The built-in sounds (`app/sounds_data.h`, made by `tools/make_sounds.py` from `tools/sounds.json`) | each sound's source is in `app/SOUNDS.md` | Maker Hip's own, CC0 1.0, and audio rendered from Felucca's presets (credit: Felucca by Leo Kuroshita, Hügelton Instruments) |
+| The IMA ADPCM decoder in `app/app.c` and the encoder in `tools/make_sounds.py` | written for STACK from the IMA standard (its two tables and its algorithm) | MPL-2.0 (the code) |
 
 Rules this project keeps:
 
