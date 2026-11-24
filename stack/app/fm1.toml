@@ -8,6 +8,7 @@ o2 = []
 gen = ["../tools/gen_version.py {gen}/stack_version.h"]   # the version, from stack/VERSION (app.h)
 words = "words.tsv"
 ble = false                    # Bluetooth MIDI comes in a later version
+usb_audio_out = false          # the FM-1 is no USB speaker: a tablet keeps its own sound. USB audio in (the FM-1 recorded) stays
 # the site and firmware.json
 tagline = "eight tracks of sounds, easy to follow"
 repo = "https://github.com/perawoga2-coder/stack"

@@ -14,7 +14,7 @@
   "hardware": {
     "models": ["FM-1"],
     "flash": ["856014", "B36014"],
-    "features": ["usb-audio-in", "usb-audio-out", "velocity", "pressure", "screen-reader"]
+    "features": ["usb-audio-in", "velocity", "pressure", "screen-reader"]
   },
   "credits": "Built on fm1-base and felucca-bsp (MPL-2.0), from Felucca by Leo Kuroshita (Hugelton Instruments). Sounds: Maker Hip's own Rock kit and FM bank; the Hugelton Sample Pack by Leo Kuroshita (CC0); Versilian Studios VCSL (CC0); audio rendered from Felucca's presets, with thanks to Leo Kuroshita."
 }
