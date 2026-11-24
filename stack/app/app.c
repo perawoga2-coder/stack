@@ -106,6 +106,23 @@ static void list_name(uint32_t i, char *b)   /* "EMPTY", "KICK ROCK", "MY 1 SPOO
         text_cat(b, " ");
         if (m->valid) {
             text_cat(b, m->name[0] ? m->name : "SAMPLE");
+            if (m->crc == 2u)
+                text_cat(b, " ?");               /* (its data is not what its header's CRC says) */
+        } else if (m->why > MY_BLANK) {          /* something is there and was refused: say what (a test version) */
+            static const char HEX[] = "0123456789ABCDEF";
+            char h[9];
+            uint32_t q;
+            for (q = 0; q < 8u; q++)
+                h[q] = HEX[(m->head >> (28u - 4u * q)) & 15u];
+            h[8] = 0;
+            int_text(m->why, n);
+            text_cat(b, m->why == MY_NOFLASH ? "(NO FLASH" : "(BAD ");
+            if (m->why != MY_NOFLASH) {
+                text_cat(b, n);
+                text_cat(b, " ");
+                text_cat(b, h);
+            }
+            text_cat(b, ")");
         } else if (m->cov) {
             int_text(m->cov, n);
             text_cat(b, "(IN MY ");
@@ -568,9 +585,16 @@ static void defaults(void)
     }
 }
 
+static uint8_t my_again;                     /* the scans after the start done so far (my_frame) */
+static uint32_t my_t0;                       /* plat_ms at the start */
 void app_init(void)
 {
-    my_load_all(1);                          /* the samples the app sent before (they stay in the flash) */
+    memset(my, 0, sizeof my);                /* (a start is from nothing: the simulator's restart keeps the RAM) */
+    ms.slot = -1;
+    mc.slot = -1;
+    rx.on = 0;
+    my_again = 0;
+    my_load_all();                           /* the samples the app sent before (they stay in the flash) */
     defaults();
 }
 
@@ -1094,6 +1118,22 @@ static void my_frame(void)                   /* every frame: what the app's mess
         my_event = 0;
         my_arrived(k);
     }
+    {   /* the scan again after the start: 1 s and 3 s on, while a slot is still not taken (and nothing comes in) */
+        uint32_t now = plat_ms() - my_t0, k, n_ok = 0;
+        if (my_again < 2u && !rx.on && now >= (my_again ? 3000u : 1000u)) {
+            for (k = 0; k < NMY; k++)
+                n_ok += my[k].valid || my[k].cov;
+            if (n_ok < NMY)
+                my_load_all();
+            if (++my_again == 2u) {                 /* then once: how many samples of the app's are here */
+                char c[4];
+                for (k = 0, n_ok = 0; k < NMY; k++)
+                    n_ok += my[k].valid;
+                int_text((int32_t)n_ok, c);
+                app_say("MY SAMPLES:", c);
+            }
+        }
+    }
     if (my_failed) {
         a[0] = 0;
         text_cat(a, "MY ");
@@ -1107,6 +1147,7 @@ static void my_frame(void)                   /* every frame: what the app's mess
 
 void app_ui_init(void)
 {
+    my_t0 = plat_ms();
     touch_on(1);                             /* velocity: the keys' readings on */
     plat_usb_audio_full(1);                  /* USB audio at full level, whatever MASTER says */
     lcd_fill(0, 0, 240, 240, C_BLACK);
@@ -1195,6 +1236,17 @@ int app_expect(const char *what, int *got)
                    ? (int)(my[(atoi(what + 7) - 1) % (int)NMY].gain * 100.0f + 0.5f) : 0;
     else if (!strncmp(what, "my", 2) && what[2] >= '1' && what[2] <= '3')   /* myN: slot N's zones (0 empty) */
         *got = my[what[2] - '1'].valid ? my[what[2] - '1'].nz : 0;
+    else if (!strncmp(what, "my_crc", 6))    /* my_crcN: slot N's data against its CRC: 0 not checked, 1 the same, 2 not */
+        *got = my[(what[6] - '1') % (int)NMY].crc;
+    else if (!strncmp(what, "my_why", 6))    /* my_whyN: why slot N is not taken (0 it is; 1 blank; 2, 5 refused; 9 no flash) */
+        *got = my[(what[6] - '1') % (int)NMY].why;
+    else if (!strcmp(what, "my_blind")) {    /* the next scans read nothing (a flash that cannot be read yet) ... */
+        host_blind = 1;
+        *got = 1;
+    } else if (!strcmp(what, "my_sees")) {   /* ... and from now on they read again */
+        host_blind = 0;
+        *got = 1;
+    }
     else if (!strcmp(what, "receiving"))
         *got = rx.on;
     else if (!strncmp(what, "trk", 3) && what[3] >= '1' && what[3] <= '8')  /* trkN: track N's place in the list */

@@ -45,6 +45,9 @@ typedef struct {
     uint8_t nz, span;
     uint8_t cov;                         /* 1 + the slot whose sample runs over this one (0: none) */
     uint8_t measured;
+    uint8_t why;                         /* why it is not valid: MY_BLANK nothing there, MY_NOFLASH, or my_parse's 2 / 5 */
+    uint8_t crc;                         /* its data against its header's CRC: 0 not checked yet, 1 the same, 2 not */
+    uint32_t head;                       /* the header's first four bytes as found (shown when it is refused) */
     char name[9];
     uint32_t bytes;
     volatile float gain;                 /* brings it to the built-in sounds' loudness */
@@ -106,8 +109,16 @@ static int my_parse(uint32_t k, const uint8_t *p, const uint8_t *data, my_slot_t
 }
 
 /* what the flash holds, read again: the slots with a sample, and those another's sample runs over */
-static uint32_t crc32_of(const uint8_t *p, uint32_t n);
-static void my_load_all(int check)           /* check: the data's CRC too (at power-on) */
+/* A slot is taken by its header alone (as the app's END left it): the data's CRC is not a condition here. It is
+ * checked afterwards, a little each frame (my_measure), and a mismatch only marks the name ("?"). 0.2.1-test checked
+ * the whole data's CRC at power-on, before anything else ran, and refused the slot on a mismatch: on the FM-1 every
+ * slot was refused after a power cycle. The scan is also run again after the start (my_rescan). */
+#define MY_BLANK 1u
+#define MY_NOFLASH 9u
+#ifdef PLAT_HOST
+static uint8_t host_blind;                   /* a test: the next scans see no flash, as if it could not be read yet */
+#endif
+static void my_load_all(void)
 {
     uint32_t k, j;
     for (k = 0; k < NMY; k++) {
@@ -115,18 +126,38 @@ static void my_load_all(int check)           /* check: the data's CRC too (at po
         uint8_t was = my[k].valid;
         float g = my[k].gain;
         uint32_t b = my[k].bytes;
+        int rc;
+#ifdef PLAT_HOST
+        if (host_blind)
+            p = 0;
+#endif
         my[k].valid = 0;
         my[k].cov = 0;
+        my[k].why = 0;
         for (j = 0; j < k; j++)
             if (my[j].valid && j + my[j].span > k)
                 my[k].cov = (uint8_t)(j + 1u);
-        if (my[k].cov || !p || my_parse(k, p, p + MY_DATA, &my[k]))
+        if (my[k].cov)
             continue;
-        if (check && crc32_of(p + MY_DATA, my[k].bytes) != rd32(p + 20))
-            continue;                            /* (its data is not what its header says: not played) */
-        if (!was || b != my[k].bytes) {          /* a new sample: its loudness is measured again */
+        if (!p) {
+            my[k].why = MY_NOFLASH;
+            continue;
+        }
+        my[k].head = rd32(p);
+        for (j = 0; j < 32u && p[j] == 0xFFu; j++)
+            ;
+        if (j == 32u) {                          /* erased: nothing was ever committed here */
+            my[k].why = MY_BLANK;
+            continue;
+        }
+        if ((rc = my_parse(k, p, p + MY_DATA, &my[k])) != 0) {
+            my[k].why = (uint8_t)rc;
+            continue;
+        }
+        if (!was || b != my[k].bytes) {          /* a new sample: its loudness is measured again, its CRC checked */
             my[k].gain = MY_GAIN_FIRST;
             my[k].measured = 0;
+            my[k].crc = 0;
         } else {
             my[k].gain = g;
         }
@@ -289,7 +320,7 @@ int app_sysex(const uint8_t *p, uint32_t n)
             rx.erased = 0x1000u;
             rx.t = plat_ms();
             rx.said = 0;
-            my_load_all(0);
+            my_load_all();
             if (rx.on)
                 my_progress();
         }
@@ -353,7 +384,7 @@ int app_sysex(const uint8_t *p, uint32_t n)
             else
                 rc = my_write(base, my_buf, MY_HDR) ? 4u : 0u;
             rx.on = 0;
-            my_load_all(0);
+            my_load_all();
             if (!rc && my[k].valid)
                 my_event = (uint8_t)(k + 1u);
             else
@@ -409,9 +440,47 @@ static void ms_zone(const sound_t *s)        /* the filters for this zone's rate
     ms.ri = ms.rn = 0;
 }
 
+/* a slot's data against its header's CRC, a piece each frame: it only marks the slot (my[k].crc) */
+static struct { int8_t slot; uint32_t at, c; } mc = {.slot = -1};
+static void my_crc_step(uint32_t budget)
+{
+    static const uint32_t T[16] = {0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu, 0x76DC4190u, 0x6B6B51F4u,
+                                   0x4DB26158u, 0x5005713Cu, 0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu,
+                                   0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu};
+    const uint8_t *p;
+    uint32_t k, c;
+    if (mc.slot < 0) {
+        for (k = 0; k < NMY && !(my[k].valid && !my[k].crc); k++)
+            ;
+        if (k == NMY)
+            return;
+        mc.slot = (int8_t)k;
+        mc.at = 0;
+        mc.c = 0xFFFFFFFFu;
+    }
+    k = (uint32_t)mc.slot;
+    p = plat_data(MY_BASE + k * MY_SIZE);
+    if (!my[k].valid || my[k].crc || !p) {       /* (it went meanwhile) */
+        mc.slot = -1;
+        return;
+    }
+    c = mc.c;
+    while (budget-- && mc.at < my[k].bytes) {
+        c ^= p[MY_DATA + mc.at++];
+        c = T[c & 15u] ^ (c >> 4);
+        c = T[c & 15u] ^ (c >> 4);
+    }
+    mc.c = c;
+    if (mc.at >= my[k].bytes) {
+        my[k].crc = ~c == rd32(p + 20) ? 1u : 2u;
+        mc.slot = -1;
+    }
+}
+
 static void my_measure(uint32_t budget)      /* at most budget samples of work */
 {
     uint32_t k;
+    my_crc_step(budget);
     if (ms.slot < 0) {
         for (k = 0; k < NMY && !(my[k].valid && !my[k].measured); k++)
             ;

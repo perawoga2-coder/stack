@@ -176,6 +176,20 @@ def main(out):
           "reboot", "wait 600", "expect my1 1", "expect my2 0", "expect my3 0", "expect trk7 0",
           "sysex_out", "sysex " + frame(15, []),
           "expect_sysex " + frame(15, [3, 80, 1] + [ord(c) for c in "SNARE"] + [0, len(sd) // 1024] + [0, 0, 0] * 2 + [1, 1, 1]),
+          "wait 3500", "shot boot_my_samples.png", "expect my_crc1 1",
+          "# 0.2.2-test: on the FM-1, 0.2.1-test found every slot empty after a power cycle. The slots are taken by",
+          "# their headers now and the scan runs again after the start. A flash that cannot be read during the start:",
+          "expect my_blind 1", "reboot", "wait 200", "expect my1 0", "expect my_why1 9", "expect my_sees 1",
+          "wait 1200", "expect my1 1", "expect my_why1 0",
+          "# a power-off and on (not only a restart)",
+          "power", "wait 3600", "expect my1 1", "expect my_crc1 1",
+          "# data that no longer matches its header's CRC: the sample stays in the list, its name marked",
+          f"data_write {0xA0000 + 512 + 64} 0000000000000000", "reboot", "wait 300", "expect my1 1", "wait 3600",
+          "expect my_crc1 2", "turn ALGO 6", "wait 30", f"turn PRESET {NS + 1}", "wait 60", "shot my_crc_marked.png",
+          "# a header that is not one: refused, and the list says what was found",
+          f"data_erase {0xA0000}", "reboot", "wait 300", "expect my1 0", "expect my_why1 1",
+          f"data_write {0xA0000} 4142434445464748", "reboot", "wait 300", "expect my1 0", "expect my_why1 2",
+          "turn ALGO 6", "wait 30", f"turn PRESET {NS + 1}", "wait 60", "shot my_refused.png",
           "expect lim_clips 0", "expect store_writes 0"]
     open(out, "w").write("\n".join(L) + "\n")
     print(f"{out}: {len(L)} lines; MY 1's gain should come to {g1:.2f}")

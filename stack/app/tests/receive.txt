@@ -1172,5 +1172,52 @@ expect trk7 0
 sysex_out
 sysex F0 7D 46 4C 0F F7
 expect_sysex F0 7D 46 4C 0F 03 50 01 53 4E 41 52 45 00 03 00 00 00 00 00 00 01 01 01 F7
+wait 3500
+shot boot_my_samples.png
+expect my_crc1 1
+# 0.2.2-test: on the FM-1, 0.2.1-test found every slot empty after a power cycle. The slots are taken by
+# their headers now and the scan runs again after the start. A flash that cannot be read during the start:
+expect my_blind 1
+reboot
+wait 200
+expect my1 0
+expect my_why1 9
+expect my_sees 1
+wait 1200
+expect my1 1
+expect my_why1 0
+# a power-off and on (not only a restart)
+power
+wait 3600
+expect my1 1
+expect my_crc1 1
+# data that no longer matches its header's CRC: the sample stays in the list, its name marked
+data_write 655936 0000000000000000
+reboot
+wait 300
+expect my1 1
+wait 3600
+expect my_crc1 2
+turn ALGO 6
+wait 30
+turn PRESET 79
+wait 60
+shot my_crc_marked.png
+# a header that is not one: refused, and the list says what was found
+data_erase 655360
+reboot
+wait 300
+expect my1 0
+expect my_why1 1
+data_write 655360 4142434445464748
+reboot
+wait 300
+expect my1 0
+expect my_why1 2
+turn ALGO 6
+wait 30
+turn PRESET 79
+wait 60
+shot my_refused.png
 expect lim_clips 0
 expect store_writes 0
