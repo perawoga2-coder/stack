@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 jobs:
   build:
@@ -28,9 +30,13 @@ jobs:
           git -C stack/base log -1 --format='fm1-base %H'
           git -C stack/base/bsp log -1 --format='felucca-bsp %H'
 
-      - name: Toolchain (JieLi clang, AC79 SDK files, Python)
+      - name: Toolchain (JieLi clang, AC79 SDK files, Python, screen reader)
         run: |
-          for i in 1 2 3; do sh stack/base/tools/setup_toolchain.sh --only uv,python,jieli,ac79-sdk && break; sleep 30; done
+          for i in 1 2 3; do sh stack/base/tools/setup_toolchain.sh --only uv,python,jieli,ac79-sdk,fm1-reader && break; sleep 30; done
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.74
 
       - name: Simulator tests
         run: |
@@ -53,3 +59,30 @@ jobs:
           path: |
             stack/app/build/*.fwsc
             stack/app/build/firmware.json
+
+      # The web installer (fm1-base's tools/make_site.py): install/, emu/, firmware/ on GitHub Pages
+      - name: Installer site
+        run: |
+          cd stack
+          base/.venv/bin/python base/tools/build.py app --web
+          base/.venv/bin/python base/tools/make_site.py app "app/build/stack-${{ steps.b.outputs.ver }}.fwsc" "${{ steps.b.outputs.ver }}" ../site
+          ls -R ../site | head -40
+
+      - uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: build
+    runs-on: ubuntu-22.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
