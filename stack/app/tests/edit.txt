@@ -1,0 +1,256 @@
+# STACK in the host simulator: the EDIT page (START, REVERSE, LOOP, LENGTH).
+#   app/build/host/stack_host app/tests/edit.txt app/build/host
+master 4096
+wait 2200
+# the piano on track 5: a second long, played once
+turn ALGO 4
+wait 40
+expect track 5
+expect sound 33
+# EDIT: its page and back, as FX, ENV and LFO
+tap EDIT
+wait 40
+expect page 5
+tap EDIT
+wait 40
+expect page 0
+tap EDIT
+wait 40
+# as it starts: the sound as it is
+expect ed_start 0
+expect ed_rev 0
+expect ed_loop 0
+expect ed_len 100
+shot edit_start.png
+key w4 down 100
+wait 100
+expect v_ed 0
+wait 700
+expect voices 1
+wait 400
+expect voices 0
+key w4 up
+wait 100
+# the knobs stop at their ends
+turn K1 150
+wait 40
+expect ed_start 99
+turn K1 -150
+wait 40
+expect ed_start 0
+turn K2 5
+wait 40
+expect ed_rev 1
+turn K2 -5
+wait 40
+expect ed_rev 0
+turn K3 5
+wait 40
+expect ed_loop 2
+turn K3 -5
+wait 40
+expect ed_loop 0
+turn K4 -150
+wait 40
+expect ed_len 1
+turn K4 150
+wait 40
+expect ed_len 100
+# --- START 50: the note begins half way in (sample 11025 of 22050), and ends half a second on
+turn K1 50
+wait 40
+wav edit_start_50.wav
+key w4 down 100
+wait 20
+expect v_ni >11025
+expect v_ni <12000
+wait 380
+expect voices 1
+wait 250
+expect voices 0
+key w4 up
+wait 200
+wavstop
+turn K1 -50
+wait 40
+# --- LENGTH 30: only the first 0.3 s plays, and ends on a fade
+turn K4 -70
+wait 40
+expect ed_len 30
+shot edit_length.png
+wav edit_length_30.wav
+key w4 down 100
+wait 200
+expect voices 1
+wait 250
+expect voices 0
+key w4 up
+wait 200
+wavstop
+# --- LOOP ON with it: that part goes round for as long as the key is held, and stops when it is let go
+turn K3 2
+wait 40
+expect ed_loop 2
+wav edit_loop.wav
+key w4 down 100
+wait 1500
+expect voices 1
+expect v_ni <6700
+wait 700
+expect voices 1
+key w4 up
+wait 1000
+expect voices 0
+wavstop
+turn K3 -2
+turn K4 70
+wait 40
+# --- REVERSE: the piano backwards: it swells and ends where it began
+turn K2 1
+wait 40
+expect ed_rev 1
+shot edit_reverse.png
+wav edit_reverse.wav
+key w4 down 100
+wait 100
+expect v_ni >19000
+peakreset
+wait 150
+expect peak_db_max -22
+wait 600
+peakreset
+wait 120
+expect peak_db_min -22
+expect voices 1
+wait 200
+expect voices 0
+key w4 up
+wait 200
+wavstop
+# five notes backwards: four sound (there are four buffers), the oldest gave its up
+key w0 down 100
+key w1 down 100
+key w2 down 100
+key w3 down 100
+wait 50
+expect voices 4
+key w4 down 100
+wait 50
+expect voices 4
+key w0 up
+key w1 up
+key w2 up
+key w3 up
+key w4 up
+wait 1200
+expect voices 0
+# backwards from START 50 with LENGTH 50: the third quarter of the sound, backwards
+turn K1 50
+turn K4 -50
+wait 40
+wav edit_reverse_part.wav
+key w4 down 100
+wait 20
+expect v_ni <16600
+expect v_ni >15000
+wait 400
+expect voices 0
+key w4 up
+wavstop
+turn K1 -50
+turn K4 50
+turn K2 -1
+wait 40
+# --- a held sound (the saw lead, track 6): LOOP OFF plays it once, to its end, under a held key
+tap EDIT
+wait 40
+turn ALGO 1
+wait 40
+expect track 6
+tap EDIT
+wait 40
+expect ed_loop 0
+key w4 down 100
+wait 1500
+expect voices 1
+key w4 up
+wait 1000
+expect voices 0
+turn K3 1
+wait 40
+expect ed_loop 1
+wav edit_lead_once.wav
+key w4 down 100
+wait 200
+expect voices 1
+wait 900
+expect voices 0
+key w4 up
+wavstop
+# LOOP ON: its own loop, as AUTO; and backwards it holds too
+turn K3 1
+turn K2 1
+wait 40
+wav edit_lead_reverse.wav
+key w4 down 100
+wait 1500
+expect voices 1
+expect v_ed 15
+key w4 up
+wait 1000
+expect voices 0
+wavstop
+turn K3 -2
+turn K2 -1
+wait 40
+# --- a hit (the kick, track 1): LOOP ON makes a roll of its first tenth while the key is held
+tap EDIT
+wait 40
+turn ALGO -5
+wait 40
+expect track 1
+tap EDIT
+wait 40
+turn K4 -90
+turn K3 2
+wait 40
+expect ed_len 10
+wav edit_kick_roll.wav
+key w4 down 100
+wait 800
+expect voices 1
+key w4 up
+wait 400
+expect voices 0
+wavstop
+turn K4 90
+turn K3 -2
+wait 40
+# --- a single cycle (GLASS HG) from START 50: it sounds (its cycle from half way)
+tap EDIT
+wait 40
+expect lim_clips 0
+# --- track 8 as the looper: EDIT does nothing and says why
+turn ALGO 7
+wait 40
+expect track 8
+press OCT-
+press OCT+
+wait 60
+release OCT+
+release OCT-
+wait 60
+expect loop_mode 1
+expect loop_own 1
+tap EDIT
+wait 40
+expect page 5
+shot edit_t8l.png
+turn K1 30
+turn K2 1
+wait 40
+expect ed_start 0
+expect ed_rev 0
+tap EDIT
+wait 40
+expect page 0

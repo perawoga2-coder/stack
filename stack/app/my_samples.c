@@ -53,7 +53,13 @@ typedef struct {
     volatile float gain;                 /* brings it to the built-in sounds' loudness */
     sound_t z[MY_ZONES];
     uint8_t lo[MY_ZONES], hi[MY_ZONES];
+    uint16_t ckz[MY_ZONES];              /* each zone's first decoder state in my_ck (made with the loudness) */
 } my_slot_t;
+/* the decoder's state every SND_CK samples of the app's samples, as the built-in sounds have theirs in the flash
+ * (sound_t.ck: the EDIT page). Made while a slot's loudness is measured; until then the slot plays as it is.
+ * A slot's states start at MY_CKN times its number; a sample over several slots has that many slots' room */
+#define MY_CKN (MY_SIZE * 2u / SND_CK + MY_ZONES)
+static uint8_t my_ck[NMY * MY_CKN * 3u] __attribute__((section(".pool")));   /* 3 KB */
 static my_slot_t my[NMY];
 static volatile uint8_t my_kill;         /* bit k: the audio interrupt ends slot k's voices (then clears it) */
 
@@ -89,6 +95,7 @@ static int my_parse(uint32_t k, const uint8_t *p, const uint8_t *data, my_slot_t
         s->cat = NCAT;
         s->lpred = 0;
         s->lidx = 0;
+        s->ck = 0;
         if (z[27] && le > ls && le < n) {
             s->flags |= SF_LOOP;
             s->ls = ls;
@@ -118,6 +125,13 @@ static int my_parse(uint32_t k, const uint8_t *p, const uint8_t *data, my_slot_t
 #ifdef PLAT_HOST
 static uint8_t host_blind;                   /* a test: the next scans see no flash, as if it could not be read yet */
 #endif
+static void my_ck_set(uint32_t k)            /* a measured slot: its zones know their states */
+{
+    uint32_t i;
+    for (i = 0; my[k].measured && i < my[k].nz; i++)
+        my[k].z[i].ck = my_ck + 3u * my[k].ckz[i];
+}
+
 static void my_load_all(void)
 {
     uint32_t k, j;
@@ -160,6 +174,7 @@ static void my_load_all(void)
             my[k].crc = 0;
         } else {
             my[k].gain = g;
+            my_ck_set(k);                        /* (the same sample: its states are still there) */
         }
         my[k].valid = 1;
     }
@@ -444,6 +459,7 @@ static struct {
     float c1, c2, u1, u2, v1, v2;                    /* the high-pass (b: 1 -2 1) */
     float acc, ring[10], peak, best;
     uint32_t an, blk, ri, rn;
+    uint32_t ck;                         /* the next decoder state's place in my_ck */
 } ms = {.slot = -1};
 
 static void ms_zone(const sound_t *s)        /* the filters for this zone's rate, from rest */
@@ -520,6 +536,8 @@ static void my_measure(uint32_t budget)      /* at most budget samples of work *
         ms.z = 0;
         ms.peak = 1.0f;
         ms.best = 0.0f;
+        ms.ck = k * MY_CKN;
+        my[k].ckz[0] = (uint16_t)ms.ck;
         ms_zone(&my[k].z[0]);
     }
     k = (uint32_t)ms.slot;
@@ -534,6 +552,7 @@ static void my_measure(uint32_t budget)      /* at most budget samples of work *
         float x, y, w;
         if (ms.i >= s->n) {                      /* the zone is done: the next one, or the result */
             if (++ms.z < my[k].nz) {
+                my[k].ckz[ms.z] = (uint16_t)ms.ck;
                 ms_zone(&my[k].z[ms.z]);
                 continue;
             }
@@ -543,9 +562,16 @@ static void my_measure(uint32_t budget)      /* at most budget samples of work *
                 float top = 0.89f * 32768.0f / ms.peak;          /* its own peak stays under -1 dBFS */
                 my[k].gain = fm_clampf(g < top ? g : top, 0.05f, 4.0f);
                 my[k].measured = 1;
+                my_ck_set(k);
                 ms.slot = -1;
             }
             return;
+        }
+        if (!(ms.i % SND_CK) && ms.ck < (k + my[k].span) * MY_CKN) {     /* the state before this sample is kept */
+            my_ck[3u * ms.ck] = (uint8_t)ms.pred;
+            my_ck[3u * ms.ck + 1u] = (uint8_t)((uint32_t)ms.pred >> 8);
+            my_ck[3u * ms.ck + 2u] = (uint8_t)ms.idx;
+            ms.ck++;
         }
         code = (((const uint8_t *)s->d)[ms.i >> 1] >> ((ms.i & 1u) << 2)) & 15u;
         step = IMA_STEP[ms.idx];

@@ -117,7 +117,12 @@ def main(out):
           "wait 600", f"expect my_gain1 >{int(g1 * 100 * 0.88)}", f"expect my_gain1 <{int(g1 * 100 * 1.12) + 1}",
           "turn ALGO 6", "wait 30", "expect track 7", f"expect sound {NS + 1}",
           "wav my1_kick.wav", "key 7 down 100", "wait 300", "expect voices >0", "key 7 up", "wait 400", "wavstop",
-          "expect peak_db_min -30", "expect lim_clips 0"]
+          "expect peak_db_min -30", "expect lim_clips 0",
+          "# the EDIT page on a sample of the app's (its loudness is measured: it can start part way and play backwards)",
+          "tap EDIT", "wait 40", "turn K1 50", "wait 40", "key 7 down 100", "wait 20", "expect v_ed 1", "expect v_ni >5500",
+          "key 7 up", "wait 400", "turn K2 1", "wait 40", "wav my1_kick_reverse.wav", "key 7 down 100", "wait 20",
+          "expect v_ed 3", "expect v_ni >9000", "expect v_ni <11025", "wait 100", "key 7 up", "wait 400", "wavstop", "expect peak_db_min -40",
+          "turn K2 -1", "turn K1 -50", "wait 40", "expect ed_start 0", "expect ed_rev 0", "tap EDIT", "wait 40", "expect page 0"]
     # 2: a kit of four hits into MY 2: onto track 8; each hit on its own key from C4
     hits = [tone(0.15, f, f * 0.6, 0.04) for f in (200.0, 420.0, 900.0, 1800.0)]
     kd, zones = [], []

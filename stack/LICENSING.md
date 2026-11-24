@@ -20,5 +20,6 @@ Rules this project keeps:
 - From Felucca only rendered audio is ever shipped: never its preset data, patch tables or code.
 - The JieLi SDK files the build needs are fetched by the build and never committed.
 - fm1-base's fonts are under the SIL OFL 1.1 (`base/LICENSING.md`).
+- Bluetooth MIDI (since 0.6.0-test, `ble_stack = "own"`) is fm1-base's own stack, `base/bt/` (Copyright (C) 2026 Henri David, from Optimist, taken under MPL-2.0), with the radio's calibration in felucca-bsp under Apache-2.0; nothing of JieLi's Bluetooth library is linked (`base/LICENSING.md`).
 
 M-VAVE and FM-1 are trademarks of their owners. STACK is not affiliated with or endorsed by M-VAVE.

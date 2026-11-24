@@ -2,6 +2,9 @@
  * Copyright (C) 2026 Maker Hip */
 /* STACK: the clock, out and in, over USB MIDI. Written for STACK. Part of the unity build: included by app.c.
  *
+ * The clock goes out over USB and, when a Bluetooth link listens, over Bluetooth; it is followed from whichever of the
+ * two it comes in on first, and from that one only while it comes. Nothing that comes in on one is sent on the other.
+ *
  * Who leads is not a setting: the FM-1 leads, and sends its clock (24 a quarter note, Start and Stop), until a clock
  * comes in; then it follows that one for as long as it comes, and sends none of its own (nothing that comes in is ever
  * sent on: no loop). When the clock in stops coming for CK_LOST_MS the FM-1 leads again, at the tempo it last followed.
@@ -34,7 +37,9 @@ static uint32_t ck_now(void) { return plat_ticks24(); }
 static struct { uint32_t due; uint8_t st; } ck_q[16];
 static volatile uint8_t ck_w, ck_r;
 static volatile uint8_t ck_follow;                   /* 1: a clock comes in and the FM-1 follows it */
-static struct { uint32_t last, ivmin, ivmax, clocks, starts, stops, fresh; } ck_sent;   /* (the simulator's checks) */
+static volatile uint8_t ck_src;                      /* following: the port it comes in on (PORT_USB, PORT_BLE) */
+static volatile uint8_t ck_ble;                      /* a Bluetooth link listens: the clock out goes there too */
+static struct { uint32_t last, ivmin, ivmax, clocks, starts, stops, fresh, ble; } ck_sent;   /* (the simulator's checks) */
 
 void app_tick_fast(void)
 {
@@ -53,6 +58,10 @@ void app_tick_fast(void)
             continue;
         }
         plat_midi_rt(0x0Fu | st << 8);
+        if (ck_ble) {                                /* and over Bluetooth, which stamps it with this time */
+            plat_midi_send(0x0Fu | st << 8, TO_BLE);
+            ck_sent.ble++;
+        }
         if (st == 0xF8u) {
             if (ck_sent.clocks++ && !ck_sent.fresh) {
                 uint32_t iv = now - ck_sent.last;
@@ -131,9 +140,10 @@ static inline float ck_wrap(float x)     /* into 0 .. CK_BAR */
 static float ck_tick_frames(void) { return ck_follow ? cki.p * (1.0f / CK_T24_FRAME) : seq_sf * (1.0f / 6.0f); }
 static uint32_t pat_frames(void) { return (uint32_t)(ck_tick_frames() * 6.0f * (float)NSTEP); }
 
-static void ck_tick_in(uint32_t s)       /* a clock tick in, stamped s */
+static void ck_tick_in(uint32_t s, int port)   /* a clock tick in, stamped s */
 {
     if (!ck_follow) {
+        ck_src = (uint8_t)port;
         ck_follow = 1;
         cki.n = 0;
         ck_ui |= 1u;
@@ -186,10 +196,12 @@ static void ck_tick_in(uint32_t s)       /* a clock tick in, stamped s */
     }
 }
 
-static void ck_midi(uint32_t st, uint32_t d1, uint32_t d2, uint32_t stamp)   /* the audio interrupt: MIDI in, real-time */
+static void ck_midi(uint32_t st, uint32_t d1, uint32_t d2, uint32_t stamp, int port)   /* the audio interrupt: MIDI in, real-time */
 {
+    if (ck_follow && port != (int)ck_src)        /* following one port's clock: the other's is left alone */
+        return;
     if (st == 0xF8u) {
-        ck_tick_in(stamp);
+        ck_tick_in(stamp, port);
     } else if (st == 0xFAu || st == 0xFBu) {
         cki.pend = (uint8_t)(st == 0xFAu ? 1u : 2u);
         cki.pend_t = stamp;

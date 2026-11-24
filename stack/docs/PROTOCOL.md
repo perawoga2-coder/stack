@@ -124,3 +124,29 @@ stretch. Under the app's clock it is kept on the bar by playing up to 0.1 % fast
 drift between two devices. **A real change of tempo in the app while a loop exists puts the loop out of time**; the
 FM-1 shows `TEMPO CHANGED: LOOP OUT OF TIME` and plays on. So the app should not change tempo under a loop without
 telling the user (or the user clears the loop and records again).
+
+## Bluetooth MIDI (since 0.6.0-test)
+
+The FM-1 is a Bluetooth LE MIDI device (the standard BLE-MIDI service): a tablet or computer connects to it as to any
+Bluetooth MIDI instrument. One link at a time. No pairing code. USB works as before, at the same time.
+
+Bluetooth carries **MIDI only**. Samples (the SysEx messages above), MUTE and audio stay on the USB cable: STACK
+answers no SysEx over Bluetooth.
+
+| | Over USB | Over Bluetooth |
+|---|---|---|
+| Notes in (play the selected track) | yes | yes |
+| Notes out | none | none |
+| Clock, Start, Stop out (the FM-1 leads) | yes | yes, while a link is up |
+| Clock, Start, Continue, Stop, Song Position in | followed | followed |
+| SysEx (samples, MUTE) | yes | no |
+
+- The rules of CLOCK above hold on both: whoever sends `F8` leads. The FM-1 follows the clock from the port it comes
+  in on first (USB or Bluetooth), and from that one only, until it stops for 0.5 s.
+- **Nothing is passed from one to the other**: what comes in over USB never goes out over Bluetooth, nor the other
+  way. And nothing that comes in is sent back.
+- While it follows a clock over Bluetooth the FM-1 shows `CLOCK: BT` and, once, `BT CLOCK: CABLE IS STEADIER`.
+  A Bluetooth clock arrives in bunches; the FM-1 smooths it, but a loop on the FM-1 holds the bar best on the cable.
+  **For the looper, send the clock over USB.**
+- The app should connect either by USB or by Bluetooth for the clock, not send it on both.
+- The FM-1's screen shows `BT` (second line of the header) while a link is up.

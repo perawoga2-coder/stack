@@ -93,6 +93,38 @@ wait 400
 wavstop
 expect peak_db_min -30
 expect lim_clips 0
+# the EDIT page on a sample of the app's (its loudness is measured: it can start part way and play backwards)
+tap EDIT
+wait 40
+turn K1 50
+wait 40
+key 7 down 100
+wait 20
+expect v_ed 1
+expect v_ni >5500
+key 7 up
+wait 400
+turn K2 1
+wait 40
+wav my1_kick_reverse.wav
+key 7 down 100
+wait 20
+expect v_ed 3
+expect v_ni >9000
+expect v_ni <11025
+wait 100
+key 7 up
+wait 400
+wavstop
+expect peak_db_min -40
+turn K2 -1
+turn K1 -50
+wait 40
+expect ed_start 0
+expect ed_rev 0
+tap EDIT
+wait 40
+expect page 0
 # MY 2 KIT: four hits, onto track 8 (empty); its keys are C4, C#4, D4, D#4
 sysex_out
 sysex F0 7D 46 4C 0F F7

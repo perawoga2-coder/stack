@@ -34,8 +34,8 @@ void app_host_ms(void);
 
 /* the store: STACK saves nothing yet of its own (no plat_store_save call in the app); the panel calibration is the
  * platform's. The offsets are fm1-base's template's */
-enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_NOBJ };
-#define APP_STORE_MAP {0xFC000u, 0xDC000u}
+enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_BLE, OBJ_NOBJ };      /* OBJ_BLE: Bluetooth's own (this FM-1's address) */
+#define APP_STORE_MAP {0xFC000u, 0xDC000u, 0xDE000u}
 
 /* the contract: the platform calls these */
 void app_init(void);

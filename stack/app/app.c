@@ -28,7 +28,10 @@ typedef struct {
     uint8_t cat;
     int16_t lpred;                       /* ADPCM: the decoder's state as it comes to the loop's first sample */
     uint8_t lidx;
+    const uint8_t *ck;                   /* ADPCM: the decoder's state before every SND_CK'th sample, 3 bytes each (its
+                                          * value, low byte first, and its step index); 0: none (PCM, or not made yet) */
 } sound_t;
+#define SND_CK 512u                      /* (tools/make_sounds.py CK) */
 #define SF_LOOP 1u                       /* holds while the key is down */
 #define SF_DRUM 2u                       /* a hit: plays through, at its own pitch on every key */
 #define SF_PCM 4u                        /* 16-bit PCM (a single cycle) */
@@ -164,6 +167,7 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and th
 #define NSTEP 16u
 #define FILT_DEAD 3                      /* FILTER: -FILT_DEAD .. +FILT_DEAD is off (seven detents wide) */
 #define FILT_MAX (50 + FILT_DEAD)
+enum { ED_LOOP_AUTO, ED_LOOP_OFF, ED_LOOP_ON };
 typedef struct {
     volatile uint8_t sound;              /* its place in the list */
     volatile int8_t pitch;               /* semitones, -24 .. +24 */
@@ -174,6 +178,17 @@ typedef struct {
     volatile int8_t env_r;               /* RELEASE ENV_AUTO, or 0 .. 100: stops at once (4 ms) .. a tail of about 1 s */
     volatile uint8_t env_s;              /* SUSTAIN 0 .. 100: the level a held sound settles at, at DECAY's pace */
     volatile uint8_t env_v;              /* VELOCITY 0 .. 100: how much the finger's weight changes the loudness */
+    /* the EDIT page: where the sound starts, how much of it plays, looped or not, backwards or not. As they start
+     * (0, off, AUTO, 100) the sound is as it is */
+    volatile uint8_t ed_start;           /* START 0 .. 99: per cent of the sound */
+    volatile uint8_t ed_rev;             /* REVERSE 0 off, 1 on */
+    volatile uint8_t ed_loop;            /* LOOP: ED_LOOP_AUTO as the sound is, ED_LOOP_OFF, ED_LOOP_ON */
+    volatile uint8_t ed_len;             /* LENGTH 1 .. 100: per cent of what is left from START (100: to the end) */
+    /* the ARP page: the track's keys played one after another while held. RATE 0 is off: the keys as they are */
+    volatile uint8_t arp_r;              /* RATE: 0 off, else ARP_R_NAME */
+    volatile uint8_t arp_m;              /* MODE: ARP_UP, ARP_DOWN, ARP_UPDOWN, ARP_ORDER */
+    volatile uint8_t arp_o;              /* OCTAVE 1 .. 3 */
+    volatile uint8_t arp_g;              /* GATE 10 .. 100: per cent of a step a note is held */
     /* the LFO (the LFO page): one a track, on the whole track. AMOUNT 0 is off: the track is as without one */
     volatile uint8_t lfo_a;              /* AMOUNT 0 .. 100 */
     volatile uint8_t lfo_r;              /* RATE: a division of the tempo, LFO_RATE_NAME */
@@ -239,6 +254,13 @@ typedef struct {
     int32_t pred;                        /* ADPCM: the decoder */
     int32_t idx;
     uint8_t done;                        /* a one-shot: its last sample has been fetched */
+    /* the EDIT page's part of it (ed 0: the sound as it is, none of this used) */
+    uint8_t ed;                          /* ED_* */
+    int8_t rb;                           /* backwards, ADPCM: its block's buffer (rev_buf), -1 none */
+    uint8_t aidx;                        /* the decoder at ea (a loop of the page's goes back to it) */
+    int16_t apred;
+    uint32_t ea, eb;                     /* the part that plays, [ea, eb) */
+    uint32_t rbase;                      /* backwards: the block in the buffer starts at this sample */
     uint8_t my;                          /* 1 + the app's slot it plays (0: a built-in sound) */
     float gain;                          /* a sample from the app: what brings it to the built-in sounds' loudness */
     uint32_t delay;                      /* frames into this block before it starts */
@@ -290,10 +312,115 @@ static float semis(float st) { return fm_exp2f(st * (1.0f / 12.0f)); }
 #define INC_MAX 4.0f                     /* at most four samples of a sound a frame: two octaves above its own rate */
 
 /* the voice's next sample (ni), decoded if it is ADPCM; a loop goes round, a one-shot ends on zeros */
+/* --- the EDIT page: a sound started part way in, cut short, looped over that part, or played backwards.
+ * ADPCM only decodes forwards, from a known state: a sound has one kept every SND_CK samples (sound_t.ck). Starting
+ * part way decodes from the nearest one (511 samples at most, once, at the note's start). Backwards, the block of
+ * SND_CK samples the place is in is decoded forwards into a buffer and read from its end; there are NREV buffers, so
+ * NREV notes play backwards at a time (a fifth takes the oldest one's). Where the part ends away from the sound's own
+ * end, and where a loop of the page's turns round, 32 samples fade: no click --- */
+enum { ED_ON = 1, ED_REV = 2, ED_LOOP = 4, ED_BAKED = 8 };
+#define NREV 4u
+#define ED_FADE 32u
+static int16_t rev_buf[NREV][SND_CK] __attribute__((section(".pool")));   /* 4 KB */
+static int8_t rev_of[NREV] = {-1, -1, -1, -1};   /* the voice each buffer is with, -1 free */
+
+static inline int32_t ima_next(const uint8_t *d, uint32_t i, int32_t *pred, int32_t *idx)
+{
+    uint32_t code = (d[i >> 1] >> ((i & 1u) << 2)) & 15u;
+    int32_t step = IMA_STEP[*idx], q = step >> 3, p = *pred;
+    if (code & 4u)
+        q += step;
+    if (code & 2u)
+        q += step >> 1;
+    if (code & 1u)
+        q += step >> 2;
+    p = code & 8u ? p - q : p + q;
+    p = p > 32767 ? 32767 : p < -32768 ? -32768 : p;
+    *pred = p;
+    q = *idx + IMA_INDEX[code & 7u];
+    *idx = q < 0 ? 0 : q > 88 ? 88 : q;
+    return p;
+}
+static void ck_state(const sound_t *s, uint32_t block, int32_t *pred, int32_t *idx)
+{
+    const uint8_t *c = s->ck + 3u * block;
+    *pred = (int16_t)((uint32_t)c[0] | (uint32_t)c[1] << 8);
+    *idx = c[2];
+}
+
+static float voice_fetch_ed(voice_t *v)
+{
+    const sound_t *s = v->s;
+    uint32_t i = v->ni, lo = v->ea, hi = v->eb, edge;
+    float x;
+    if (v->ed & ED_BAKED) {                  /* the sound's own loop: it holds there (no fades: it is seamless) */
+        lo = s->ls;
+        hi = s->le;
+    }
+    if (v->ed & ED_REV) {
+        if ((int32_t)i < (int32_t)lo) {      /* past the part's start */
+            if (!(v->ed & ED_LOOP)) {
+                v->done = 1;
+                return 0.0f;
+            }
+            i = hi - 1u;
+        }
+        v->ni = i - 1u;                      /* (below 0: 0xFFFFFFFF, read as -1 above) */
+        if (s->flags & SF_PCM) {
+            x = (float)((const int16_t *)s->d)[i];
+        } else {
+            if (v->rb < 0)
+                return 0.0f;
+            if (i - v->rbase >= SND_CK) {    /* another block: decoded forwards, from its kept state */
+                uint32_t b = i / SND_CK, k, n = s->n - b * SND_CK < SND_CK ? s->n - b * SND_CK : SND_CK;
+                int32_t pred, idx;
+                int16_t *o = rev_buf[v->rb];
+                ck_state(s, b, &pred, &idx);
+                for (k = 0; k < n; k++)
+                    o[k] = (int16_t)ima_next((const uint8_t *)s->d, b * SND_CK + k, &pred, &idx);
+                v->rbase = b * SND_CK;
+            }
+            x = (float)rev_buf[v->rb][i - v->rbase];
+        }
+    } else {
+        if (v->ed & ED_BAKED) {
+            if (i >= hi) {
+                i = lo;
+                v->pred = s->lpred;
+                v->idx = s->lidx;
+            }
+        } else if (i >= hi) {
+            if (!(v->ed & ED_LOOP)) {
+                v->done = 1;
+                return 0.0f;
+            }
+            i = lo;
+            v->pred = v->apred;
+            v->idx = v->aidx;
+        }
+        v->ni = i + 1u;
+        x = s->flags & SF_PCM ? (float)((const int16_t *)s->d)[i] : (float)ima_next((const uint8_t *)s->d, i, &v->pred, &v->idx);
+    }
+    if (v->ed & ED_BAKED)
+        return x;
+    /* the fades: where it will stop (unless that is the sound's own end, forwards), and both ends of a loop */
+    edge = v->ed & ED_REV ? i - lo : hi - 1u - i;
+    if (edge < ED_FADE && (v->ed & (ED_LOOP | ED_REV) || hi < s->n || (s->flags & SF_LOOP)))
+        x *= (float)edge * (1.0f / (float)ED_FADE);
+    if (v->ed & ED_LOOP) {
+        edge = v->ed & ED_REV ? hi - 1u - i : i - lo;
+        if (edge < ED_FADE)
+            x *= (float)edge * (1.0f / (float)ED_FADE);
+    }
+    return x;
+}
+
 static float voice_fetch(voice_t *v)
 {
     const sound_t *s = v->s;
     uint32_t i = v->ni;
+    if (v->ed)
+        return voice_fetch_ed(v);
     if (s->flags & SF_LOOP) {
         if (i >= s->le) {
             i = s->ls;
@@ -357,6 +484,59 @@ static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay,
     v->idx = 0;
     v->done = 0;
     v->frac = 0.0f;
+    for (i = 0; i < NREV; i++)               /* (this voice's last note may have had a buffer) */
+        if (rev_of[i] == (int8_t)k)
+            rev_of[i] = -1;
+    v->ed = 0;
+    v->rb = -1;
+    if ((trk[t].ed_start || trk[t].ed_len < 100u || trk[t].ed_rev || trk[t].ed_loop != ED_LOOP_AUTO) &&
+        ((s->flags & SF_PCM) || s->ck) && s->n > 4u * ED_FADE) {
+        /* the EDIT page has changed something: the part that plays, and how */
+        const uint32_t n = s->n, loop = trk[t].ed_loop == ED_LOOP_ON || (trk[t].ed_loop == ED_LOOP_AUTO && (s->flags & SF_LOOP));
+        uint32_t a = (uint32_t)((uint64_t)n * trk[t].ed_start / 100u), b;
+        if (a > n - 4u * ED_FADE)
+            a = n - 4u * ED_FADE;
+        b = trk[t].ed_len >= 100u ? n : a + (uint32_t)((uint64_t)(n - a) * trk[t].ed_len / 100u);
+        if (b < a + 4u * ED_FADE)
+            b = a + 4u * ED_FADE;
+        v->ed = (uint8_t)(ED_ON | (loop ? ED_LOOP : 0u) | (trk[t].ed_rev ? ED_REV : 0u));
+        if (loop && (s->flags & SF_LOOP)) {  /* its own loop is the loop; it starts at START if that is before its end */
+            v->ed |= ED_BAKED;
+            if (a >= s->le)
+                a = s->ls;
+        }
+        v->ea = a;
+        v->eb = b;
+        if (v->ed & ED_REV) {
+            v->ni = (v->ed & ED_BAKED ? s->le : b) - 1u;
+            v->rbase = 0xFFFFFFFFu - SND_CK;     /* (no block in the buffer yet) */
+            if (!(s->flags & SF_PCM)) {
+                uint32_t q, best = 0, age = 0xFFFFFFFFu;
+                for (q = 0; q < NREV && rev_of[q] >= 0 && voice[rev_of[q]].state != V_OFF; q++)
+                    if (voice[rev_of[q]].age < age) {
+                        age = voice[rev_of[q]].age;
+                        best = q;
+                    }
+                if (q == NREV) {             /* none free: the oldest backwards note gives its up, and ends */
+                    q = best;
+                    voice[rev_of[q]].state = V_OFF;
+                    voice[rev_of[q]].rb = -1;
+                }
+                rev_of[q] = (int8_t)k;
+                v->rb = (int8_t)q;
+            }
+        } else {
+            if (!(s->flags & SF_PCM)) {      /* to START: from the kept state before it */
+                uint32_t q = a / SND_CK * SND_CK;
+                ck_state(s, a / SND_CK, &v->pred, &v->idx);
+                for (; q < a; q++)
+                    ima_next((const uint8_t *)s->d, q, &v->pred, &v->idx);
+            }
+            v->ni = a;
+            v->apred = (int16_t)v->pred;
+            v->aidx = (uint8_t)v->idx;
+        }
+    }
     v->s0 = voice_fetch(v);
     v->s1 = voice_fetch(v);
     v->env = 1.0f;
@@ -383,8 +563,8 @@ static void voice_release(uint32_t t, uint32_t note, uint32_t seq)
         voice_t *v = &voice[i];
         /* (a hit plays through, unless the track's RELEASE is set, under 100: then letting go fades it too) */
         if (v->state == V_HELD && v->track == t && v->seq == seq && (seq || v->note == note) &&
-            (!(v->s->flags & SF_DRUM) || (trk[t].env_r >= 0 && trk[t].env_r < 100)))
-            v->state = V_REL;
+            (!(v->s->flags & SF_DRUM) || (trk[t].env_r >= 0 && trk[t].env_r < 100) || (v->ed & ED_LOOP)))
+            v->state = V_REL;                /* (and a hit the EDIT page loops: it would never end) */
     }
 }
 
@@ -413,9 +593,9 @@ static void midi_in(void)                    /* audio interrupt: MIDI in plays t
     uint32_t stamp;
     while (ck_midi_in(&pkt, &stamp, &port)) {
         uint32_t st = (pkt >> 8) & 0xFFu, d1 = (pkt >> 16) & 0x7Fu, d2 = pkt >> 24;
-        if (st >= 0xF0u) {                   /* the clock, Start, Continue, Stop, Song Position: from USB only */
-            if (port == PORT_USB)
-                ck_midi(st, d1, d2 & 0x7Fu, stamp);
+        if (st >= 0xF0u) {                   /* the clock, Start, Continue, Stop, Song Position: from USB or Bluetooth */
+            if (port == PORT_USB || port == PORT_BLE)
+                ck_midi(st, d1, d2 & 0x7Fu, stamp, port);
         } else if ((st & 0xF0u) == 0x90u && d2)
             voice_start(ui_sel_isr, d1, d2, 0, 0, 0);
         else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u)
@@ -578,6 +758,117 @@ static void seq_block(uint32_t n)
     }
 }
 
+/* --- the ARP page: the keys held on a track played one after another, in time with the sequencer's clock (its own,
+ * or the one it follows). It lives in the audio interrupt: the keys' events come to it instead of to the voices while
+ * its track's RATE is not OFF. While the pattern plays its steps fall on the bar's grid; stopped, it keeps its own
+ * time from the first key. Its notes are the keys' own (not the sequencer's), so a take of the looper records them --- */
+enum { ARP_UP, ARP_DOWN, ARP_UPDOWN, ARP_ORDER, NARP_M };
+#define NARP_R 8u
+#define ARP_KEYS 16u
+static const char *const ARP_M_NAME[NARP_M] = {"UP", "DOWN", "UP-DOWN", "ORDER"};
+static const char *const ARP_R_NAME[NARP_R] = {"OFF", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
+static const uint8_t ARP_R_TICKS[NARP_R] = {0, 24, 16, 12, 8, 6, 4, 3};   /* a step in clock ticks (24 a quarter note) */
+static struct {
+    uint8_t n, trk;                      /* the keys held, on this track */
+    uint8_t note[ARP_KEYS], vel[ARP_KEYS];       /* in the order they were pressed */
+    uint8_t on, cur;                     /* a note of its sounds: which */
+    uint32_t i;                          /* the step it is at */
+    float since;                         /* frames since its last step */
+    float off;                           /* frames until the sounding note is let go (GATE) */
+} arp;
+
+static void arp_key(uint32_t tr, uint32_t note, uint32_t vel, uint32_t down)
+{
+    uint32_t k;
+    if (down) {
+        if (arp.n && arp.trk != tr)              /* (keys of another track: it starts over with them) */
+            arp.n = 0;
+        if (!arp.n) {
+            arp.trk = (uint8_t)tr;
+            arp.i = 0;
+            arp.since = 1e9f;                    /* stopped: the first key sounds at once */
+        }
+        for (k = 0; k < arp.n && arp.note[k] != note; k++)
+            ;
+        if (k == arp.n && arp.n < ARP_KEYS) {
+            arp.note[arp.n] = (uint8_t)note;
+            arp.vel[arp.n++] = (uint8_t)vel;
+        }
+    } else {
+        for (k = 0; k < arp.n && !(arp.trk == tr && arp.note[k] == note); k++)
+            ;
+        if (k == arp.n) {
+            voice_release(tr, note, 0);          /* (a key that went down before the ARP was on) */
+            return;
+        }
+        for (arp.n--; k < arp.n; k++) {
+            arp.note[k] = arp.note[k + 1u];
+            arp.vel[k] = arp.vel[k + 1u];
+        }
+    }
+}
+
+static void arp_block(uint32_t n)
+{
+    const track_t *t = &trk[arp.trk];
+    const uint32_t r = t->arp_r < NARP_R ? t->arp_r : 0u;
+    float per, left;
+    if (arp.on) {                                /* GATE: the note's time is up (to the block: 5.8 ms) */
+        arp.off -= (float)n;
+        if (arp.off <= 0.0f || !arp.n || !r) {
+            voice_release(arp.trk, arp.cur, 0);
+            arp.on = 0;
+        }
+    }
+    if (!arp.n)
+        return;
+    if (!r) {                                    /* RATE went to OFF under held keys: they are let go */
+        arp.n = 0;
+        return;
+    }
+    per = (float)ARP_R_TICKS[r] * ck_tick_frames();
+    if (seq_running) {                           /* on the bar's grid: the next multiple of the step from here */
+        const float at = seq_phase * CK_BAR / (float)ARP_R_TICKS[r], dt = seq_dphase * CK_BAR / (float)ARP_R_TICKS[r];
+        const float to = (float)((uint32_t)at + 1u) - at;        /* steps of the ARP to its next one */
+        left = at - (float)(uint32_t)at < 0.0005f && arp.since > per * 0.5f ? 0.0f : dt > 0.0f ? to / dt : 1e9f;
+    } else {
+        left = per - arp.since;
+    }
+    if (left < (float)n && arp.since + (left > 0.0f ? left : 0.0f) > per * 0.5f) {
+        uint8_t seq[ARP_KEYS];
+        const uint32_t oct = t->arp_o >= 1u && t->arp_o <= 3u ? t->arp_o : 1u, m = t->arp_m, len = arp.n * oct;
+        uint32_t a, b, cyc, pos, note, off = left > 0.0f ? (uint32_t)left : 0u;
+        for (a = 0; a < arp.n; a++)
+            seq[a] = (uint8_t)a;
+        if (m != ARP_ORDER)                      /* low to high */
+            for (a = 1; a < arp.n; a++)
+                for (b = a; b && arp.note[seq[b]] < arp.note[seq[b - 1u]]; b--) {
+                    uint8_t x = seq[b];
+                    seq[b] = seq[b - 1u];
+                    seq[b - 1u] = x;
+                }
+        cyc = m == ARP_UPDOWN && len > 1u ? 2u * len - 2u : len;
+        pos = arp.i % cyc;
+        if (m == ARP_UPDOWN && pos >= len)
+            pos = cyc - pos;
+        if (m == ARP_DOWN)
+            pos = len - 1u - pos;
+        note = arp.note[seq[pos % arp.n]] + 12u * (pos / arp.n);
+        if (arp.on)
+            voice_release(arp.trk, arp.cur, 0);
+        if (note > 127u)
+            note = 127u;
+        voice_start(arp.trk, note, arp.vel[seq[pos % arp.n]], off, 0, 0);
+        arp.cur = (uint8_t)note;
+        arp.on = 1;
+        arp.off = (float)off + per * (float)(t->arp_g < 10u ? 10u : t->arp_g > 100u ? 100u : t->arp_g) * 0.01f;
+        arp.i++;
+        arp.since = (float)(n - off);
+    } else {
+        arp.since += (float)n;
+    }
+}
+
 #define VOICE_AMP 1.0f                   /* a voice at full velocity, before its track's LEVEL */
 static float tb[APP_BLOCK];                  /* one track's bus */
 static float mixl[APP_BLOCK], mixr[APP_BLOCK];
@@ -594,6 +885,7 @@ typedef struct {
     float dcoef;                         /* a hit's DECAY (1: none) */
     float kd, sus;                       /* a held sound: to SUSTAIN at DECAY's pace (sus 1: stays as it is) */
     float rcoef;                         /* RELEASE */
+    float rhit;                          /* and a hit's that the EDIT page loops: RELEASE, or at AUTO about 0.1 s */
 } env_t;
 
 static void voice_render(voice_t *v, float *out, uint32_t n, const env_t *e, float rate)
@@ -611,7 +903,7 @@ static void voice_render(voice_t *v, float *out, uint32_t n, const env_t *e, flo
         if (att < 1.0f)
             att += ainc;                     /* ATTACK (at 0: ~1 ms, no click on a sound that starts away from zero) */
         if (v->state == V_REL)
-            env *= rcoef;
+            env *= (v->ed & ED_LOOP) && (v->s->flags & SF_DRUM) ? e->rhit : rcoef;
         else if (settle)
             env += (sus - env) * kd;
         else
@@ -649,10 +941,14 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
     }
     while (r != evq_w) {                     /* the keys' notes since the last block */
         uint32_t e = evq[r], kind = e >> 24, tr = e & 0xFFu, note = (e >> 8) & 0x7Fu, vel = (e >> 16) & 0x7Fu;
-        if (kind == QE_ON)
+        if (kind == QE_ON && trk[tr].arp_r)
+            arp_key(tr, note, vel, 1);           /* the ARP page: the key joins the ones it plays */
+        else if (kind == QE_ON)
             voice_start(tr, note, vel, 0, 0, 0);
         else if (kind == QE_PING)
             voice_start(tr, note, vel, 0, 0, 8820);   /* a step's note heard for 0.2 s */
+        else if (arp.n)
+            arp_key(tr, note, 0, 0);
         else
             voice_release(tr, note, 0);
         r = (r + 1u) % EVQ;
@@ -668,6 +964,8 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             seq_bars++;
         last = seq_running ? seq_phase : 0.0f;
     }
+    if (arp.n || arp.on)
+        arp_block(n);
     for (i = 0; i < n; i++)
         mixl[i] = mixr[i] = rec_in[i] = 0.0f;
     for (t = 0; t < NTRK; t++) {
@@ -703,6 +1001,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             ev.sus = (float)trk[t].env_s / 100.0f;
             ev.kd = 1.0f - fm_expf(-1.0f / (0.020f * fm_exp2f(kd * 0.066f) * 44100.0f));
             ev.rcoef = er < 0 ? rcoef : fm_expf(-1.0f / (0.004f * fm_exp2f((float)er * 0.08f) * 44100.0f));
+            ev.rhit = er < 0 ? 0.99849f : ev.rcoef;
         }
         if (lfo_on) {                            /* the LFO: where it is in this block, and what it moves */
             const uint32_t r = trk[t].lfo_r < NLFO_R ? trk[t].lfo_r : LFO_R_START;
@@ -938,6 +1237,14 @@ static void defaults(void)
         trk[t].env_r = ENV_AUTO;
         trk[t].env_s = 100;
         trk[t].env_v = ENV_V_START;
+        trk[t].ed_start = 0;
+        trk[t].ed_rev = 0;
+        trk[t].ed_loop = ED_LOOP_AUTO;
+        trk[t].ed_len = 100;
+        trk[t].arp_r = 0;
+        trk[t].arp_m = ARP_UP;
+        trk[t].arp_o = 1;
+        trk[t].arp_g = 50;
         trk[t].lfo_a = 0;
         trk[t].lfo_r = LFO_R_START;
         trk[t].lfo_t = LFO_PITCH;
@@ -961,10 +1268,14 @@ void app_init(void)
     lp.div = 2;
     lp.bars = 1;
     stack_mute = 0;                          /* a start always sounds */
+    memset(&arp, 0, sizeof arp);
+    memset(rev_of, -1, sizeof rev_of);
     memset(&cki, 0, sizeof cki);             /* and leads, at 120 */
     memset(&ck_tb, 0, sizeof ck_tb);
     memset(&ck_sent, 0, sizeof ck_sent);
     ck_follow = 0;
+    ck_src = PORT_USB;
+    ck_ble = 0;
     ck_ui = 0;
     ck_r = ck_w;
     seq_sf = SEQ_SF_120;
@@ -981,7 +1292,7 @@ void app_init(void)
 }
 
 /* --------------------------------------------------------------------- UI --- */
-enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV, PAGE_LFO };
+enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV, PAGE_LFO, PAGE_EDIT, PAGE_ARP };
 static struct {
     char msg[2][28];                     /* a short message over the header */
     uint32_t msg_until;
@@ -1254,6 +1565,38 @@ static void knob_turn(uint32_t k, int32_t e)
     track_t *t = &trk[ui.sel];
     char a[28], n[12];
     a[0] = 0;
+    if (ui.page == PAGE_EDIT) {              /* the EDIT page: START, REVERSE, LOOP, LENGTH */
+        if (on_t8l()) {                      /* the looper's track has no sound to edit */
+            app_say("T8L IS THE LOOP:", "NOTHING TO EDIT");
+            return;
+        }
+        ui.hot = (int8_t)k;
+        ui.hot_t = plat_ms();
+        if (k == 0u)
+            t->ed_start = (uint8_t)clamp(t->ed_start + e, 0, 99);
+        else if (k == 1u)
+            t->ed_rev = (uint8_t)clamp(t->ed_rev + e, 0, 1);
+        else if (k == 2u)
+            t->ed_loop = (uint8_t)clamp(t->ed_loop + e, 0, 2);
+        else
+            t->ed_len = (uint8_t)clamp(t->ed_len + e, 1, 100);
+        ui.redraw = 1;
+        return;
+    }
+    if (ui.page == PAGE_ARP) {               /* the ARP page: RATE, MODE, OCTAVE, GATE */
+        ui.hot = (int8_t)k;
+        ui.hot_t = plat_ms();
+        if (k == 0u)
+            t->arp_r = (uint8_t)clamp(t->arp_r + e, 0, (int32_t)NARP_R - 1);
+        else if (k == 1u)
+            t->arp_m = (uint8_t)clamp(t->arp_m + e, 0, (int32_t)NARP_M - 1);
+        else if (k == 2u)
+            t->arp_o = (uint8_t)clamp(t->arp_o + e, 1, 3);
+        else
+            t->arp_g = (uint8_t)clamp(t->arp_g + e, 10, 100);
+        ui.redraw = 1;
+        return;
+    }
     if (ui.page == PAGE_LFO) {               /* the LFO's page: AMOUNT, RATE, TARGET, SHAPE */
         ui.hot = (int8_t)k;
         ui.hot_t = plat_ms();
@@ -1452,15 +1795,20 @@ static void input(void)
                 app_say(seq_play_req ? "PLAY" : "STOP", "");
         } else if (k == B_SEQ && on_t8l()) {     /* the looper's track has no steps */
             say_t8l();
-        } else if (k == B_SEQ || k == B_FX || k == B_ENV || k == B_LFO) {   /* SEQ: the steps and back; FX, ENV, LFO: their pages and back */
-            uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : k == B_ENV ? PAGE_ENV : PAGE_LFO;
+        } else if (k == B_SEQ || k == B_FX || k == B_ENV || k == B_LFO || k == B_EDIT || k == B_ARP) {
+            /* SEQ: the steps and back; FX, ENV, LFO, EDIT, ARP: their pages and back */
+            uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : k == B_ENV ? PAGE_ENV : k == B_LFO ? PAGE_LFO :
+                          k == B_EDIT ? PAGE_EDIT : PAGE_ARP;
             ui.page = (uint8_t)(ui.page == to ? PAGE_PLAY : to);
             ui.held_step = -1;
             for (e = 0; e < (int32_t)NKEYS; e++)        /* keys held across the change let go */
                 if (ui.keys >> e & 1u)
                     ev_put(QE_OFF, ui.trk_of[e], ui.note_of[e], 0);
             app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : ui.page == PAGE_ENV ? "ENV PAGE" :
-                    ui.page == PAGE_LFO ? "LFO PAGE" : "TRACKS PAGE", "");
+                    ui.page == PAGE_LFO ? "LFO PAGE" : ui.page == PAGE_EDIT ? "EDIT PAGE" : ui.page == PAGE_ARP ? "ARP PAGE" :
+                    "TRACKS PAGE", "");
+            if (ui.page == PAGE_EDIT && on_t8l())
+                app_say("T8L IS THE LOOP:", "NOTHING TO EDIT");
         } else {
             app_say(BTN_NAME[k], "NOT IN THIS VERSION");   /* (never a silent press) */
         }
@@ -1499,7 +1847,7 @@ static void input(void)
                * can be taken off */
               (ui.loop_mode && (lp.state == LP_REC || (lp.state == LP_ARMED && (plat_ms() >> 7 & 1u))) ? 1u << B_OCTUP : 0u) |
               (ui.loop_mode && lp.undo ? 1u << B_OCTDN : 0u) |
-              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
+              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
         for (k = 0; k < 16u; k++)
             if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
@@ -1515,6 +1863,42 @@ void app_input_only(void) { input(); }
 
 /* ------------------------------------------------------------------ screen --- */
 #define C_ORANGE RGB(255, 122, 47)
+
+/* the EDIT (pg 0) and ARP (pg 1) pages: each of the selected track's four values in words, and where its knob stands
+ * (pos, 0 .. 226; 0 for none wanted) */
+static void page_words(uint32_t pg, char w[4][28], int32_t *pos)
+{
+    static const char *const LOOPW[3] = {"AUTO", "OFF", "ON"};
+    const track_t *t = &trk[ui.sel];
+    int32_t p4[4];
+    uint32_t q;
+    for (q = 0; q < 4u; q++)
+        w[q][0] = 0;
+    if (!pg) {
+        int_text(t->ed_start, w[0]);
+        text_cat(w[0], "%");
+        text_cat(w[1], t->ed_rev ? "ON" : "OFF");
+        text_cat(w[2], LOOPW[t->ed_loop < 3u ? t->ed_loop : 0u]);
+        int_text(t->ed_len, w[3]);
+        text_cat(w[3], "%");
+        p4[0] = t->ed_start * 226 / 99;
+        p4[1] = t->ed_rev * 226;
+        p4[2] = t->ed_loop * 113;
+        p4[3] = (t->ed_len - 1) * 226 / 99;
+    } else {
+        text_cat(w[0], ARP_R_NAME[t->arp_r < NARP_R ? t->arp_r : 0u]);
+        text_cat(w[1], ARP_M_NAME[t->arp_m < NARP_M ? t->arp_m : 0u]);
+        int_text(t->arp_o, w[2]);
+        int_text(t->arp_g, w[3]);
+        text_cat(w[3], "%");
+        p4[0] = t->arp_r * 226 / ((int32_t)NARP_R - 1);
+        p4[1] = t->arp_m * 226 / ((int32_t)NARP_M - 1);
+        p4[2] = (t->arp_o - 1) * 113;
+        p4[3] = (t->arp_g - 10) * 226 / 90;
+    }
+    for (q = 0; pos && q < 4u; q++)
+        pos[q] = p4[q];
+}
 
 static void draw_header(void)
 {
@@ -1566,7 +1950,7 @@ static void draw_header(void)
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
-        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : ui.page == PAGE_LFO ? "LFO" : "TRACKS",
+        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : ui.page == PAGE_LFO ? "LFO" : ui.page == PAGE_EDIT ? "EDIT" : ui.page == PAGE_ARP ? "ARP" : "TRACKS",
                 C_GRAY);
         t[0] = 0;
         text_cat(t, "OCT ");
@@ -1583,7 +1967,12 @@ static void draw_header(void)
     {
         int32_t x = cv_text(6, 15, &FONT_T, APP_VERSION, C_GRAY);
         if (!(ui.loop_mode && now >= ui.msg_until && ((ui.dn_t && !ui.dn_fired) || lp.state == LP_REC)))
-            cv_text(x + 8, 15, &FONT_T, ck_follow ? "CLOCK: BURGER" : "CLOCK: FM-1", ck_follow ? C_HI : C_GRAY);
+        {
+            x = cv_text(x + 8, 15, &FONT_T, !ck_follow ? "CLOCK: FM-1" : ck_src == PORT_BLE ? "CLOCK: BT" : "CLOCK: BURGER",
+                        ck_follow ? C_HI : C_GRAY);
+            if (ck_ble)                      /* a Bluetooth link is up */
+                cv_text(x + 6, 15, &FONT_T, "BT", C_WHITE);
+        }
     }
     if (stack_mute && !(ui.loop_mode && now >= ui.msg_until && ((ui.dn_t && !ui.dn_fired) || lp.state == LP_REC))) {
         /* the app plays the FM-1's sound: said on the second line, on every page (a looper's bar there goes first) */
@@ -1681,6 +2070,21 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     char v[12];
     cv_begin(240, 52, C_BLACK);
     cv_rect(0, 0, 240, 1, C_LINE);
+    if (ui.page == PAGE_EDIT || ui.page == PAGE_ARP) {   /* the EDIT and ARP pages: their four knobs and their values */
+        static const char *const N4[2][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"}};
+        const uint32_t pg = ui.page == PAGE_ARP;
+        char w4[4][28];
+        page_words(pg, w4, 0);
+        for (k = 0; k < 4u; k++) {
+            int32_t x = 4 + (int32_t)k * 59;
+            int hot = ui.hot == (int8_t)k && now - ui.hot_t < 900u;
+            cv_text(x, 3, &FONT_T, N4[pg][k], hot ? C_WHITE : C_GRAY);
+            cv_text(x, 16, &FONT_XS, w4[k], hot ? C_WHITE : C_HI);
+        }
+        cv_text(4, 40, &FONT_T, pg ? "ARP: BACK TO THE TRACKS" : "EDIT: BACK TO THE TRACKS", C_DIM);
+        cv_blit(0, 188);
+        return;
+    }
     if (ui.page == PAGE_LFO) {               /* the LFO's page: its four knobs and their values */
         static const char *const LN[4] = {"AMOUNT", "RATE", "TARGET", "SHAPE"};
         for (k = 0; k < 4u; k++) {
@@ -1904,6 +2308,58 @@ static void draw_lfo(void)
     }
 }
 
+/* the EDIT and ARP pages: as the ENV and LFO pages, the selected track's four values, each its name, its value in
+ * words and a line that shows where the knob stands */
+static void draw_page4(uint32_t pg)
+{
+    static const char *const NAME[2][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"}};
+    const track_t *tr = &trk[ui.sel];
+    const sound_t *snd = list_sound(tr->sound);
+    const uint32_t t8 = !pg && on_t8l();
+    uint32_t q;
+    int32_t pos[4];
+    char w[4][28], t[28], n[8];
+    page_words(pg, w, pos);
+    if (!pg) {                               /* (in words what the number alone would not say) */
+        if (!tr->ed_start)
+            text_cat(w[0], " FROM ITS START");
+        if (tr->ed_loop == ED_LOOP_AUTO)
+            text_cat(w[2], snd && (snd->flags & SF_LOOP) ? ": AS THE SOUND, LOOPED" : ": AS THE SOUND, ONCE");
+        else if (tr->ed_loop == ED_LOOP_ON)
+            text_cat(w[2], snd && (snd->flags & SF_LOOP) ? ": ITS OWN LOOP" : ": START TO LENGTH");
+        if (tr->ed_len == 100u)
+            text_cat(w[3], " TO ITS END");
+    } else if (!tr->arp_r) {
+        w[0][0] = 0;
+        text_cat(w[0], "OFF: THE KEYS AS THEY ARE");
+    }
+    for (q = 0; q < 4u; q++) {
+        int32_t y = q < 2u ? 22 + (int32_t)q * 29 : 2 + (int32_t)(q - 2u) * 29;
+        uint32_t off = t8 || (pg && q != 0u && !tr->arp_r);      /* (the ARP off: the rest waits) */
+        int hot = ui.hot == (int8_t)q && plat_ms() - ui.hot_t < 900u;
+        if (!(q & 1u)) {
+            cv_begin(240, 80, C_BLACK);
+            if (!q) {                            /* whose page this is */
+                trk_text(ui.sel, n);
+                cv_text(6, 2, &FONT_B, n, C_ORANGE);
+                t[0] = 0;
+                if (t8)
+                    text_cat(t, "THE LOOP: NOTHING TO EDIT");
+                else
+                    list_name(tr->sound, t);
+                cv_text(40, 2, &FONT_S, t, C_WHITE);
+            }
+        }
+        cv_text(6, y, &FONT_B, NAME[pg][q], hot ? C_ORANGE : off ? C_GRAY : C_WHITE);
+        cv_text(234 - text_w(&FONT_XS, w[q]), y + 1, &FONT_XS, w[q], off ? C_GRAY : C_HI);
+        cv_rect(6, y + 20, 228, 1, C_DIM);       /* the knob's line */
+        cv_rect(6, y + 19, pos[q], 3, off ? C_GRAY : C_ORANGE);
+        cv_rect(6 + (pos[q] ? pos[q] - 1 : 0), y + 16, 3, 9, off ? C_GRAY : C_WHITE);
+        if (q & 1u)
+            cv_blit(0, 28 + (q >> 1) * 80u);
+    }
+}
+
 #define TITLE_MS 2000u                   /* the title after a start: the name and the version, large */
 static void draw_title(void)                 /* in the tracks' place; the keys, the knobs and the header work meanwhile */
 {
@@ -1927,6 +2383,8 @@ static void draw(void)
         draw_env();
     else if (ui.page == PAGE_LFO)
         draw_lfo();
+    else if (ui.page == PAGE_EDIT || ui.page == PAGE_ARP)
+        draw_page4(ui.page == PAGE_ARP);
     else if (ui.page == PAGE_STEP)
         draw_steps();
     else
@@ -2041,6 +2499,14 @@ void app_frame(void)
     my_frame();
     if (mute_frame())
         ui.redraw = 1;
+    {
+        const uint8_t bt = (uint8_t)(plat_ble_connected() != 0);
+        if (bt != ck_ble) {                  /* a Bluetooth link came or went: the header says, the clock out follows */
+            ck_ble = bt;
+            app_say(bt ? "BLUETOOTH:" : "BLUETOOTH:", bt ? "CONNECTED" : "GONE");
+            ui.redraw = 1;
+        }
+    }
     if (ck_ui) {                             /* the clock: who leads now, and what the leader's transport did */
         uint32_t ev = ck_ui;
         ck_ui = 0;
@@ -2050,8 +2516,8 @@ void app_frame(void)
             app_say("STOP", "");
         else if (ev & 4u)
             app_say("PLAY", "");
-        else if (ev & 1u)
-            app_say("CLOCK:", "BURGER");
+        else if (ev & 1u)                    /* (over Bluetooth a clock wanders: for the looper, the cable) */
+            app_say(ck_src == PORT_BLE ? "BT CLOCK:" : "CLOCK:", ck_src == PORT_BLE ? "CABLE IS STEADIER" : "BURGER");
         ui.redraw = 1;
     }
     {
@@ -2138,6 +2604,14 @@ int app_expect(const char *what, int *got)
         *got = seq_play_req;
     else if (!strcmp(what, "notes_out"))     /* messages sent over USB, the clock, Start and Stop left out */
         *got = (int)plat_midi_count(PORT_USB, 1);
+    else if (!strcmp(what, "bt"))            /* a Bluetooth link listens */
+        *got = (int)ck_ble;
+    else if (!strcmp(what, "clk_src"))       /* following: 0 USB, 1 Bluetooth; -1 the FM-1 leads */
+        *got = ck_follow ? (int)ck_src : -1;
+    else if (!strcmp(what, "clk_bt_out"))    /* clock ticks, Starts and Stops sent over Bluetooth */
+        *got = (int)ck_sent.ble;
+    else if (!strcmp(what, "bt_out"))        /* other messages sent over Bluetooth (notes): none, ever */
+        *got = (int)plat_midi_count(PORT_BLE, 1);
     else if (!strcmp(what, "clk_follow"))
         *got = (int)ck_follow;
     else if (!strcmp(what, "clk_bpm10"))     /* the tempo now, in tenths of a beat a minute */
@@ -2226,6 +2700,36 @@ int app_expect(const char *what, int *got)
         *got = trk[ui.sel].env_s;
     else if (!strcmp(what, "env_v"))
         *got = trk[ui.sel].env_v;
+    else if (!strcmp(what, "v_ni") || !strcmp(what, "v_ed")) {   /* the first sounding voice: its next sample, its ED_* */
+        uint32_t k;
+        *got = -1;
+        for (k = 0; k < NVOICE && voice[k].state == V_OFF; k++)
+            ;
+        if (k < NVOICE)
+            *got = what[2] == 'n' ? (int)voice[k].ni : (int)voice[k].ed;
+    }
+    else if (!strcmp(what, "ed_start"))      /* the selected track's EDIT page: START, REVERSE, LOOP (0 AUTO, 1 OFF, 2 ON), LENGTH */
+        *got = trk[ui.sel].ed_start;
+    else if (!strcmp(what, "ed_rev"))
+        *got = trk[ui.sel].ed_rev;
+    else if (!strcmp(what, "ed_loop"))
+        *got = trk[ui.sel].ed_loop;
+    else if (!strcmp(what, "ed_len"))
+        *got = trk[ui.sel].ed_len;
+    else if (!strcmp(what, "arp_r"))         /* its ARP page: RATE (0 OFF), MODE, OCTAVE, GATE */
+        *got = trk[ui.sel].arp_r;
+    else if (!strcmp(what, "arp_m"))
+        *got = trk[ui.sel].arp_m;
+    else if (!strcmp(what, "arp_o"))
+        *got = trk[ui.sel].arp_o;
+    else if (!strcmp(what, "arp_g"))
+        *got = trk[ui.sel].arp_g;
+    else if (!strcmp(what, "arp_note"))      /* the note the ARP sounds (-1: none) */
+        *got = arp.on ? (int)arp.cur : -1;
+    else if (!strcmp(what, "arp_keys"))
+        *got = arp.n;
+    else if (!strcmp(what, "arp_steps"))     /* the steps it has played since its keys went down */
+        *got = (int)arp.i;
     else if (!strcmp(what, "lfo_a"))         /* the selected track's LFO: AMOUNT, RATE, TARGET, SHAPE */
         *got = trk[ui.sel].lfo_a;
     else if (!strcmp(what, "lfo_r"))
