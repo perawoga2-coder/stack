@@ -843,10 +843,11 @@ static void input(void)
             ui.note_of[k] = (uint8_t)note;
             ui.trk_of[k] = ui.sel;
             ev_put(QE_ON, ui.sel, (uint32_t)note, v ? v : 100u);
-            plat_midi_send(0x09u | 0x90u << 8 | (uint32_t)note << 16 | (v ? v : 100u) << 24, TO_USB);
+            /* (the keys send no MIDI notes: up to 0.2.2-test they did, and the Burger Studio app plays its own drum
+             * pads on any note that comes in, pad = note % 32, which came back through the FM-1's USB audio and
+             * sounded like drums on some of the keys. Notes out return with a setting of their own) */
         } else if (up) {
             ev_put(QE_OFF, ui.trk_of[k], ui.note_of[k], 0);
-            plat_midi_send(0x08u | 0x80u << 8 | (uint32_t)ui.note_of[k] << 16, TO_USB);
         }
     }
 
