@@ -16,6 +16,9 @@ Messages with other command numbers get no answer.
 | 14 | 0E | ERASE | empty a MY slot |
 | 15 | 0F | INFO | what the three MY slots hold |
 | 20 | 14 | MUTE | the FM-1's own sound off or on (since 0.4.1-test) |
+| 30 | 1E | SONG | a piece of the song as it is now (since 4.0-beta) |
+| 31 | 1F | LOOP INFO | is there a loop on track 8, and its size |
+| 32 | 20 | LOOP DATA | a piece of the loop's audio |
 | 112 | 70 | SHOW | is the sample in this slot there |
 | 114 | 72 | HELLO | STACK's name and version |
 
@@ -155,3 +158,118 @@ answers no SysEx over Bluetooth.
   **For the looper, send the clock over USB.**
 - The app should connect either by USB or by Bluetooth for the clock, not send it on both.
 - The FM-1's screen shows `BT` (second line of the header) while a link is up.
+
+## VACUUM: the song and the loop (since 4.0-beta)
+
+The app pulls the whole project off the FM-1 over the USB cable. The app asks piece by piece and STACK answers each
+piece. There is no mode and no button on the FM-1: it answers on any page, playing or stopped. A dump only reads:
+nothing is written to the flash, and nothing on the FM-1 changes. While it runs the FM-1's screen shows
+`SENDING TO BURGER`.
+
+**Pacing:** ask for one piece, wait for its answer, then ask for the next. STACK holds at most one answer. If the
+USB queue has no room, the answer waits until it has (the sound goes on meanwhile). If an answer does not come
+within about half a second, ask for the same piece again. A firmware older than 4.0-beta answers none of these
+messages: that is how the app knows.
+
+Data bytes are packed 7 to 8, as in the sample messages: for every 7 bytes (or what is left), first one byte with
+their top bits (bit 0 for the first), then the bytes with the top bit cleared. A piece is 128 bytes before packing.
+Numbers of more than 7 bits are sent low 7 bits first.
+
+### 30 (hex 1E): SONG
+
+    ask:     F0 7D 46 4C 1E <piece lo> <piece hi> F7
+    answer:  F0 7D 46 4C 1E <piece lo> <piece hi> <pieces lo> <pieces hi> <data, packed> F7
+
+**Asking for piece 0 makes the record** from the FM-1's state at that moment (NOT from what SAVE last kept); the
+other pieces are of that same record. Ask for piece 0 first, then 1 to pieces − 1. A piece past the end is answered
+with no data. The record is 800 bytes (7 pieces). All numbers in it are little-endian.
+
+The head, 32 bytes:
+
+| Offset | Size | What |
+|---|---|---|
+| 0 | 4 | `STKD` |
+| 4 | 1 | the record's version: 1 |
+| 5 | 1 | tracks: 8 |
+| 6 | 1 | bytes a track: 96 |
+| 7 | 1 | flags: bit 0 a loop is on track 8, bit 1 the pattern plays, bit 2 the FM-1 follows a clock |
+| 8 | 2 | the record's length in bytes (800) |
+| 10 | 4 | CRC-32 (the usual one, as zlib's) of the bytes from offset 16 to the end |
+| 16 | 1 | tempo, BPM |
+| 17 | 1 | time signature: 0 2/4, 1 3/4, 2 4/4, 3 6/8, 4 7/8 |
+| 18 | 1 | steps in the pattern: 8, 12, 14 or 16 |
+| 19 | 1 | swing, 50 (straight) to 75 |
+| 20 | 1 | the selected track, 0 to 7 |
+| 21 | 1 | the loop's layers |
+| 22 | 10 | the firmware's version as text, e.g. `4.0-BETA` |
+
+Then eight tracks of 96 bytes, T1 first:
+
+| Offset | Size | What |
+|---|---|---|
+| 0 | 1 | kind: 0 EMPTY, 1 a built-in sound, 2 a sample of the app's (MY 1 to 3), 3 the looper (T8L) |
+| 1 | 1 | category: 0 DRUMS, 1 BASS, 2 KEYS, 3 PAD, 4 LEAD, 5 FX; 255 none |
+| 2 | 1 | the MY slot, 1 to 3 (kind 2) |
+| 3 | 1 | bit 0: a hit (plays through, its own pitch on every key); bit 1: a held sound with a loop |
+| 4 | 4 | a built-in sound's stable ID: FNV-1a (32 bits) of its name |
+| 8 | 4 | kind 2: the CRC-32 the sample's header names for its data (as the app sent it) |
+| 12 | 16 | the sound's name as text, zero-padded: `KICK ROCK`, a sample's own name, `LOOP` |
+| 28 | 25 | the settings, one byte each (below) |
+| 56 | 16 | steps 1 to 16: 1 on, 0 off (only the first "steps in the pattern" play) |
+| 72 | 16 | each step's MIDI note (60 is middle C; a hit ignores it) |
+| 88 | 8 | the category as text, zero-padded: `DRUMS`, `BASS`, `KEYS`, `PAD`, `LEAD`, `FX`, `MY`, `LOOP`, or empty |
+
+The 25 settings, in order (signed ones are two's complement):
+
+| # | Setting | Range |
+|---|---|---|
+| 0 | PITCH, semitones | −24 to 24 |
+| 1 | FILTER: negative a low-pass closing, positive a high-pass opening, −3 to 3 is off | −53 to 53 |
+| 2 | DECAY | 0 to 100 |
+| 3 | LEVEL (80 is the starting level; the gain is its square) | 0 to 100 |
+| 4 | ENV ATTACK | 0 to 100 |
+| 5 | ENV RELEASE (−1 is AUTO) | −1 to 100 |
+| 6 | ENV SUSTAIN | 0 to 100 |
+| 7 | ENV VELOCITY | 0 to 100 |
+| 8 | LFO AMOUNT (0 off) | 0 to 100 |
+| 9 | LFO RATE: 0 4 BARS, 2 BARS, 1 BAR, 1/2, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 10 1/32 | 0 to 10 |
+| 10 | LFO TARGET: 0 PITCH, 1 FILTER, 2 LEVEL, 3 PAN | 0 to 3 |
+| 11 | LFO SHAPE: 0 SINE, 1 TRIANGLE, 2 SQUARE, 3 SAW UP, 4 SAW DOWN | 0 to 4 |
+| 12 | EDIT START, per cent | 0 to 99 |
+| 13 | EDIT REVERSE | 0 or 1 |
+| 14 | EDIT LOOP: 0 AUTO, 1 OFF, 2 ON | 0 to 2 |
+| 15 | EDIT LENGTH, per cent | 1 to 100 |
+| 16 | FIT: 0 OFF, 1 1/4 bar, 2 1/2, 3 1, 4 2, 5 4 bars | 0 to 5 |
+| 17 | ARP RATE: 0 OFF, 1 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 7 1/32 | 0 to 7 |
+| 18 | ARP MODE: 0 UP, 1 DOWN, 2 UP-DOWN, 3 ORDER | 0 to 3 |
+| 19 | ARP OCTAVE | 1 to 3 |
+| 20 | ARP GATE, per cent | 10 to 100 |
+| 21 | FX slot A: 0 OFF, 1 DELAY, 2 ECHO, 3 REVERB, 4 TAPE SPEED, 5 ROBOT, 6 FLANGER, 7 OVERDRIVE, 8 CHORUS, 9 LO-FI | 0 to 9 |
+| 22 | FX slot B, the same | 0 to 9 |
+| 23 | FX A's knob: −3 to 3 off; left and right are the effect's two flavours | −53 to 53 |
+| 24 | FX B's knob | −53 to 53 |
+
+### 31 (hex 1F): LOOP INFO
+
+    ask:     F0 7D 46 4C 1F F7
+    answer:  F0 7D 46 4C 1F <has> <rate> <n lo> <n mid> <n hi> <layers> <ver lo> <ver hi> <CRC, 4 bytes packed> F7
+
+- `<has>`: 1 a loop plays on track 8, 0 none (the rest is then 0).
+- `<rate>`: 0 the loop is at 22 050 Hz, 1 at 11 025 Hz. Mono.
+- `<n>`: its samples (21 bits). Its length in seconds is n / rate; it is one pattern long at the tempo it was
+  recorded at.
+- `<ver>`: a number (14 bits) that changes whenever the loop that plays is another one: a layer added, an undo, a
+  clear.
+- CRC: CRC-32 of the loop's 2 × n data bytes.
+
+### 32 (hex 20): LOOP DATA
+
+    ask:     F0 7D 46 4C 20 <piece lo> <piece hi> F7
+    answer:  F0 7D 46 4C 20 <piece lo> <piece hi> <ver lo> <ver hi> <data, packed> F7
+
+128 bytes a piece: 64 samples, 16 bits signed, low byte first. **Full scale is 16384, not 32768** (two layers at
+full level fit): divide by 16384 for −1 to 1. A piece past the end has no data. Ask LOOP INFO, then pieces 0 to
+(2 × n − 1) / 128. If a piece's `<ver>` is not the one LOOP INFO gave, the loop changed while it was read: start
+again. Check the CRC at the end.
+
+A loop of the longest kind (2 s at 22 kHz) is 88 208 bytes: 690 pieces.

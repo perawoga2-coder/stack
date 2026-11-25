@@ -1507,6 +1507,8 @@ static void song_clear(void)                 /* the saved song gone, and the FM-
     }
 }
 
+#include "dump.c"                         /* the dump for the app's VACUUM: the song and the loop, read only */
+
 void app_init(void)
 {
     fx_reset();
@@ -1523,6 +1525,7 @@ void app_init(void)
     memset(&arp, 0, sizeof arp);
     memset(rev_of, -1, sizeof rev_of);
     perform_reset();
+    memset(&dump, 0, sizeof dump);
     memset(&cki, 0, sizeof cki);             /* and leads, at 120 */
     memset(&ck_tb, 0, sizeof ck_tb);
     memset(&ck_sent, 0, sizeof ck_sent);
@@ -3162,6 +3165,14 @@ void app_frame(void)
         song_drawn = 1;
         ui.redraw = 1;
     }
+    dump_frame();
+    if (dump.t && now - dump.t < 700u) {     /* a dump runs: said in the header, kept up while it goes on */
+        static uint32_t said;
+        if (now - said > 400u || !said) {
+            app_say("SENDING TO BURGER", "");
+            said = now | 1u;
+        }
+    }
     if (pf_undo_gone) {                      /* a buffer effect of PERFORM's took the block the looper's undo was in */
         pf_undo_gone = 0;
         app_say("PERFORM USED", "THE UNDO LAYER");
@@ -3398,6 +3409,18 @@ int app_expect(const char *what, int *got)
         if (k < NVOICE)
             *got = what[2] == 'n' ? (int)voice[k].ni : (int)voice[k].ed;
     }
+    else if (!strcmp(what, "dump_sent"))     /* the dump: answers sent, answers that had to wait for room, one waiting now */
+        *got = (int)dump.sent;
+    else if (!strcmp(what, "dump_held"))
+        *got = (int)dump.held;
+    else if (!strcmp(what, "dump_waits"))
+        *got = dump.n != 0u;
+    else if (!strcmp(what, "dump_loop_ok"))  /* the loop's pieces as they went, in order, are the loop: their CRC is its CRC */
+        *got = lp.has && dump.next && ~dump.crc == ~dump_crc(0xFFFFFFFFu, (const uint8_t *)loop_m[lp.cur], lp.total / lp.div * 2u);
+    else if (!strcmp(what, "dump_pieces"))   /* the loop's pieces sent since piece 0 */
+        *got = (int)dump.next;
+    else if (!strcmp(what, "loop_ver"))
+        *got = (int)(lp.ver & 0x3FFFu);
     else if (!strcmp(what, "perform"))       /* PERFORM: SEL is held */
         *got = ui.perform;
     else if (!strcmp(what, "pf_lit"))        /* its effects that are on: a bit each, key 1 the lowest */

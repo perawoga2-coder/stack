@@ -309,6 +309,8 @@ static uint8_t my_buf[MY_HDR + 32u];     /* a message's data, unpacked (main loo
 
 static void my_progress(void);           /* (app.c: the screen says how far the sample has come) */
 
+static void dump_sysex(uint32_t cmd, const uint8_t *a, uint32_t na);   /* (dump.c) */
+
 int app_sysex(const uint8_t *p, uint32_t n)
 {
     uint32_t cmd, k, base, na;
@@ -439,6 +441,8 @@ int app_sysex(const uint8_t *p, uint32_t n)
         rp_b(stack_mute);
         rp_b(MUTE_KEEP_MS / 100u);
         rp_send();
+    } else if (cmd >= 30u && cmd <= 32u) {       /* the dump for the app's VACUUM: the song, the loop (dump.c) */
+        dump_sysex(cmd, a, na);
     } else if (cmd == 112u) {                    /* SHOW: STACK placed it already (END); say whether it is there */
         rp_begin(112);
         rp_b(k);

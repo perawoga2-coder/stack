@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 3.99-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.0-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -276,6 +276,17 @@ Burger Studio is Maker Hip's app. It sends samples to the FM-1 over the USB cabl
 - A slot that could not be read shows a note in the list, such as `(EMPTY)` or `(BAD …)`.
 - When the FM-1's screen shows `SOUND IN BURGER`, the app has muted the FM-1's own speaker and plays the FM-1's
   sound itself.
+
+## VACUUM: the whole song into Burger Studio
+
+Burger Studio can pull your whole STACK song off the FM-1: all eight tracks with their sounds, knobs and steps, the
+tempo, the time signature, the swing, and the loop on track 8.
+
+- Connect the FM-1 with the USB cable and press VACUUM FM-1 in the app.
+- You do nothing on the FM-1. It works on any page, playing or stopped.
+- The FM-1's screen shows `SENDING TO BURGER` while it runs. The music keeps playing.
+- Nothing on the FM-1 changes. It sends what is there now, saved or not.
+- This is the way to keep a loop: the loop is gone when you switch the FM-1 off.
 
 ## SAVE
 

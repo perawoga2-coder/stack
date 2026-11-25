@@ -36,6 +36,7 @@ static struct {
     volatile uint8_t div;                /* frames of the mix a sample: 2 or 4 */
     volatile uint8_t bars;               /* the pattern's passes a loop spans: 1 (more only in the simulator's tests) */
     volatile uint32_t done;              /* takes finished (the screen says so) */
+    volatile uint32_t ver;               /* goes up whenever the loop that plays is another (a take in, an undo, a clear): a dump knows */
     volatile uint32_t frame;             /* frames since the loop's start */
     volatile uint32_t total;             /* frames in the loop */
     uint8_t cur;                         /* the block that plays */
@@ -77,6 +78,7 @@ static inline void loop_turn(void)           /* the loop's start: a take that wa
         lp.layers++;
         lp.state = LP_IDLE;
         lp.done++;
+        lp.ver++;
     } else if (lp.state == LP_ARMED) {
         lp.state = LP_REC;
         lp.undo = 0;                         /* (the other block is the take's from here) */
@@ -210,6 +212,7 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
                     lp.cur ^= 1u;
                     lp.has = lp.prev_ok;
                     lp.prev_ok = 0;
+                    lp.ver++;
                     lp.layers = (uint8_t)(lp.layers ? lp.layers - 1u : 0u);
                 }
             } else if (lp.fading == 2u) {        /* clear: out */
@@ -220,6 +223,7 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
                     lp.has = 0;
                     lp.prev_ok = 0;
                     lp.layers = 0;
+                    lp.ver++;
                 }
             }
         }
