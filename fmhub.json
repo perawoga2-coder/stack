@@ -1,0 +1,12 @@
+{
+  "what": "Clock Anything. STACK is Maker Hip's own firmware for the FM-1: eight tracks, each one sound from 69 built-in sounds or a sample sent from the Burger Studio app, with DJ-style effects, ENV, LFO, EDIT and ARP per track, a 16-step sequencer, a looper on track 8, SAVE, and MIDI clock in or out over USB and Bluetooth. Works as one studio with the Burger Studio app for Android.",
+  "author": "Maker Hip (Hippie Maker)",
+  "kinds": [
+    "groove",
+    "drums"
+  ],
+  "cheat": "https://perawoga2-coder.github.io/stack/manual/",
+  "image": "stack/app/site/img/cover.png",
+  "sounds": "own: Maker Hip's Rock kit and FM bank; CC0: the Hügelton Sample Pack and VCSL; audio rendered from Felucca's presets, with thanks to Leo Kuroshita",
+  "color": "#FF7A2F"
+}

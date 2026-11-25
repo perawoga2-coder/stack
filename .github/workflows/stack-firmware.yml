@@ -9,7 +9,7 @@ on:
     paths: ["stack/**", ".github/workflows/stack-firmware.yml"]
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -60,18 +60,7 @@ jobs:
             stack/app/build/*.fwsc
             stack/app/build/firmware.json
 
-      # A version that is not "-test" (e.g. 3.95-beta) gets its own release page with the .fwsc; "beta" is a pre-release
-      - name: Release page
-        if: ${{ !endsWith(steps.b.outputs.ver, '-test') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VER="${{ steps.b.outputs.ver }}"
-          PRE=""; case "$VER" in *beta*|*alpha*|*rc*) PRE="--prerelease";; esac
-          gh release delete "v$VER" --yes --cleanup-tag -R "$GITHUB_REPOSITORY" || true
-          gh release create "v$VER" "stack/app/build/stack-$VER.fwsc" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $PRE \
-            --title "STACK $VER" \
-            --notes "STACK $VER for the M-VAVE FM-1 by Maker Hip. Install it from Chrome or Edge at https://perawoga2-coder.github.io/stack/install/ with the FM-1 on USB. This is a beta: you install it at your own risk, and the installer can put M-VAVE's own firmware back. Source under MPL-2.0; built on fm1-base and felucca-bsp."
+      # (releases come from release.yml: a version tag, built and attested by The Firmware Hub's shared workflow)
 
       # The web installer (fm1-base's tools/make_site.py): install/, emu/, firmware/ on GitHub Pages
       - name: Installer site

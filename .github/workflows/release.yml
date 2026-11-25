@@ -1,0 +1,16 @@
+# The Firmware Hub's shared build: on a version tag (v*) GitHub builds STACK from this source, attests the .fwsc
+# and makes the release ("Built from source" on the hub). Release: git tag v3.98-beta && git push origin v3.98-beta
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    uses: zvenson/fm1-build/.github/workflows/build.yml@v1
+    permissions:
+      contents: write        # the release
+      id-token: write        # the signing certificate
+      attestations: write    # the attestation
+    with:
+      build: ./build.sh --release "${GITHUB_REF_NAME#v}"
+      packages: stack/app/build/*.fwsc
