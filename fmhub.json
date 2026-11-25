@@ -8,5 +8,6 @@
   "cheat": "https://perawoga2-coder.github.io/stack/manual/",
   "image": "stack/docs/card.png",
   "sounds": "own: Maker Hip's Rock kit and FM bank; CC0: the Hügelton Sample Pack and VCSL; audio rendered from Felucca's presets, with thanks to Leo Kuroshita",
-  "color": "#FF7A2F"
+  "color": "#FF7A2F",
+  "play": "https://perawoga2-coder.github.io/stack/emu/"
 }
