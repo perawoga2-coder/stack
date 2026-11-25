@@ -239,7 +239,8 @@ static volatile uint8_t seq_len = NSTEP;     /* steps in the pattern: 8, 12, 14 
 static volatile uint8_t seq_sig = 2;         /* SIG_NAME's */
 static volatile uint8_t seq_swing = 50;
 static volatile float trk_pk[NTRK];          /* each track's highest sample since the screen last looked (the city view: city.c) */
-static volatile uint8_t city_on;             /* the view is up: the audio interrupt keeps trk_pk */
+static volatile float mst_pk[2];              /* and the mix's, left and right */
+static volatile uint8_t city_on;             /* the view is up: the audio interrupt keeps trk_pk and mst_pk */
 static uint8_t bt_on = 1;                    /* GLO's BLUETOOTH: on at every start (nothing is saved yet) */
 static uint32_t bt_again;                    /* GLO's DISCONNECT: when it was turned off, to be turned on again (0: not) */
 #define NSIG 5u
@@ -1235,6 +1236,17 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             fx_sf = sf;
         fx_buses(mixl, mixr, n, fx_sf);
     }
+    if (city_on) {                               /* the city view is up: the mix's level, left and right, for the kerbs */
+        float pl = 0.0f, pr = 0.0f;
+        for (i = 0; i < n; i++) {
+            pl = fm_fabsf(mixl[i]) > pl ? fm_fabsf(mixl[i]) : pl;
+            pr = fm_fabsf(mixr[i]) > pr ? fm_fabsf(mixr[i]) : pr;
+        }
+        if (pl > mst_pk[0])
+            mst_pk[0] = pl;
+        if (pr > mst_pk[1])
+            mst_pk[1] = pr;
+    }
     voices_on = on;
     /* the master's limiter: the mix is held back LIM_AHEAD frames, so the gain is already down when a peak comes out.
      * The level's follower rises at once and falls over ~0.25 s; under LIM_T nothing is touched (gain 1) */
@@ -1951,7 +1963,7 @@ static void knob_turn(uint32_t k, int32_t e)
     ui.redraw = 1;
 }
 
-#include "city.c"                         /* the city view: the tracks' levels as a street's signs */
+#include "city.c"                         /* the city view: the sounds' levels as a street's lights */
 
 #define SAVE_HOLD_MS 2000u                /* SAVE held this long clears the saved song */
 #define HOME_HOLD_MS 500u                 /* HOME held this long opens the city view */
@@ -3187,8 +3199,14 @@ int app_expect(const char *what, int *got)
     }
     else if (!strcmp(what, "city"))          /* the city view: 0 closed, 1 .. 3 fading in, 4 up */
         *got = city.stage;
-    else if (!strcmp(what, "city_lv"))       /* the selected track's sign: its level, in 1/1000 */
-        *got = (int)(city.lv[ui.sel] * 1000.0f);
+    else if (!strcmp(what, "city_grp"))      /* the group the selected track's sound is in: 0 KICK, SNARE, HI-HAT, BASS, MELODY, 5 SOUND; -1 none */
+        *got = (int)city_group(ui.sel);
+    else if (!strncmp(what, "city_g", 6) && what[6] >= '0' && what[6] < '0' + (int)NGRP && !what[7])
+        *got = (int)(city.lv[what[6] - '0'] * 1000.0f);      /* city_gN: group N's lamp, its level in 1/1000 */
+    else if (!strcmp(what, "city_flashes"))  /* white flashes since the view opened first */
+        *got = (int)city.flashes;
+    else if (!strcmp(what, "city_el") || !strcmp(what, "city_er"))   /* the lights lit along the left, the right kerb */
+        *got = city.edge[what[6] == 'r'] == 255u ? 0 : city.edge[what[6] == 'r'];
     else if (!strcmp(what, "song_junk")) {   /* host only: a record that is not a song put where the song is kept */
         static uint8_t junk[SONG_LEN];
         uint32_t i;
@@ -3213,8 +3231,8 @@ int app_expect(const char *what, int *got)
         *got = (int)((double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 50.0);
         t0 = clock();
         for (i = 0; i < 500u; i++)
-            city_signs(i);
-        printf("  bench_city: the whole city %d us, its eight signs %.1f us (this computer, not an FM-1)\n", *got,
+            city_lights(i);
+        printf("  bench_city: the whole city %d us, its lamps and kerb lights %.1f us (this computer, not an FM-1)\n", *got,
                (double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 500.0);
         ui.redraw = 1;
     }

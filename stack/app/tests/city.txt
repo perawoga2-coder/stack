@@ -20,6 +20,73 @@ key w12 up
 wait 40
 tap SEQ
 wait 40
+# --- which lamp a track's sound lights: 0 KICK, 1 SNARE, 2 HI-HAT, 3 BASS, 4 MELODY, 5 SOUND, -1 none
+expect city_grp 0
+turn ALGO 1
+wait 40
+expect city_grp 1
+turn ALGO 1
+wait 40
+expect city_grp 2
+turn ALGO 1
+wait 40
+expect city_grp 3
+turn ALGO 1
+wait 40
+expect city_grp 4
+turn ALGO 1
+wait 40
+expect city_grp 4
+turn ALGO 1
+wait 40
+# track 7, EMPTY: none. Then down the list: a tom with the kick, a clap and a rim with the snare, an open hat, a crash
+# and a ride with the hi-hat, a cowbell and a hand drum with SOUND; a pad is MELODY; an effect is SOUND
+expect city_grp -1
+turn PRESET 7
+wait 60
+expect sound 7
+expect city_grp 0
+turn PRESET 2
+wait 40
+expect sound 9
+expect city_grp 2
+turn PRESET 1
+wait 40
+expect city_grp 2
+turn PRESET 3
+wait 40
+expect sound 13
+expect city_grp 1
+turn PRESET 2
+wait 40
+expect sound 15
+expect city_grp 5
+turn PRESET 1
+wait 40
+expect city_grp 1
+turn PRESET 6
+wait 40
+expect sound 22
+expect city_grp 5
+turn PRESET -16
+wait 60
+expect sound 6
+expect city_grp 2
+turn PRESET 44
+wait 80
+expect sound 50
+expect city_grp 4
+turn PRESET 16
+wait 60
+expect sound 66
+expect city_grp 5
+turn PRESET -66
+wait 120
+expect sound 0
+expect city_grp -1
+turn ALGO -6
+wait 60
+expect track 1
 # stopped: it never comes by itself
 wait 12000
 expect city 0
@@ -32,7 +99,13 @@ expect city >0
 wait 500
 expect city 4
 wait 300
-expect city_lv >50
+# the kick's lamp (the nearest pole) shows it, and flashed white at its hits; the snare's is dark (no snare plays)
+expect city_g0 >50
+expect city_g1 0
+expect city_flashes >0
+# the kerbs' lights, left and right, run out with the master (the kick is in the middle: the same both sides)
+expect city_el >3
+expect city_er >3
 shot city_playing.png
 # the keys play on under it, and do not close it
 turn ALGO 0
@@ -137,6 +210,8 @@ expect loop_mode 0
 wait 10600
 expect city 4
 shot city_looper.png
+# (track 8 is the looper's: its loop is of the SOUND group)
+turn ALGO 0
 turn K4 1
 wait 40
 expect city 0
@@ -152,7 +227,20 @@ expect city >0
 release HOME
 wait 600
 expect city 4
+# stopped and silent: every lamp dark, no light along the kerbs
+wait 1500
+expect city_g0 0
+expect city_el 0
+expect city_er 0
 shot city_stopped.png
+# a key played under it: its group's lamp lights (track 1, the kick)
+key w4 down 100
+wait 60
+expect city_g0 >50
+expect city_el >0
+key w4 up
+wait 100
+expect city 4
 wait 3000
 expect city 4
 tap ENV
