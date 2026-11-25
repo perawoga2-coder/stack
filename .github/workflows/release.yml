@@ -1,9 +1,12 @@
 # The Firmware Hub's shared build: on a version tag (v*) GitHub builds STACK from this source, attests the .fwsc
-# and makes the release ("Built from source" on the hub). Release: git tag v3.98-beta && git push origin v3.98-beta
+# and makes the release ("Built from source" on the hub). Release: a version tag (v3.98-beta), pushed or made
+# as a release on GitHub's site (Releases > Draft a new release > new tag on this branch).
 name: release
 on:
   push:
     tags: ["v*"]
+  release:                   # a release made on GitHub's site (a new tag there) builds it too
+    types: [published]
 jobs:
   build:
     uses: zvenson/fm1-build/.github/workflows/build.yml@v1
