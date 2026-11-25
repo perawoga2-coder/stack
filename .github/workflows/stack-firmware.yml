@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -62,13 +63,22 @@ jobs:
 
       # (releases come from release.yml: a version tag, built and attested by The Firmware Hub's shared workflow)
 
-      # The web installer (fm1-base's tools/make_site.py): install/, emu/, firmware/ on GitHub Pages
+      # The web installer (fm1-base's tools/make_site.py). The site's front (install/, the download) is the newest
+      # RELEASE (made by release.yml, The Firmware Hub's build); this branch's build is at test/ for the owner to try first.
       - name: Installer site
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           cd stack
           base/.venv/bin/python base/tools/build.py app --web
-          base/.venv/bin/python base/tools/make_site.py app "app/build/stack-${{ steps.b.outputs.ver }}.fwsc" "${{ steps.b.outputs.ver }}" ../site
-          ls -R ../site | head -40
+          TAG=$(gh release list -R "$GITHUB_REPOSITORY" --limit 20 --json tagName,isDraft --jq '[.[] | select(.isDraft|not) | select(.tagName|test("-test$")|not)][0].tagName')
+          REL="${TAG#v}"
+          mkdir -p ../rel && gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "stack-$REL.fwsc" -D ../rel --clobber
+          base/.venv/bin/python base/tools/make_site.py app "../rel/stack-$REL.fwsc" "$REL" ../site
+          base/.venv/bin/python base/tools/make_site.py app "app/build/stack-${{ steps.b.outputs.ver }}.fwsc" "${{ steps.b.outputs.ver }}" ../site-test
+          mv ../site-test ../site/test
+          echo "front: $REL   test/: ${{ steps.b.outputs.ver }}"
+          ls ../site ../site/test
 
       - uses: actions/configure-pages@v5
         continue-on-error: true
