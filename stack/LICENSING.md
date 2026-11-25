@@ -12,6 +12,7 @@ STACK is under the Mozilla Public License 2.0 (MPL-2.0), file by file: each sour
 | `app/looper.c`: the looper on track 8 | written for STACK | MPL-2.0 |
 | `app/clock.c`: the MIDI clock out and in | written for STACK | MPL-2.0 |
 | `app/city.c`: the city view (drawn by code, no picture stored) | written for STACK | MPL-2.0 |
+| `app/perform.c`: PERFORM (SEL and a white key: an effect on everything) | written for STACK from its own description; nothing from another firmware | MPL-2.0 |
 | `app/docs/MANUAL.md` and its screenshots (`app/docs/img/`, from the simulator) | written for STACK | MPL-2.0 |
 | The IMA ADPCM decoder in `app/app.c` and the encoder in `tools/make_sounds.py` | written for STACK from the IMA standard (its two tables and its algorithm) | MPL-2.0 (the code) |
 

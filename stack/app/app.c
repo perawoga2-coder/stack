@@ -241,6 +241,8 @@ static volatile uint8_t seq_swing = 50;
 static volatile float trk_pk[NTRK];          /* each track's highest sample since the screen last looked (the city view: city.c) */
 static volatile float mst_pk[2];              /* and the mix's, left and right */
 static volatile uint8_t city_on;             /* the view is up: the audio interrupt keeps trk_pk and mst_pk */
+static uint8_t pf_latch;                     /* GLO's PERFORM LATCH: a key turns its effect on, and again off */
+static void perform_off(void);               /* (every effect of PERFORM's off: below, with the keys) */
 static uint8_t bt_on = 1;                    /* GLO's BLUETOOTH: on at every start (nothing is saved yet) */
 static uint32_t bt_again;                    /* GLO's DISCONNECT: when it was turned off, to be turned on again (0: not) */
 #define NSIG 5u
@@ -937,6 +939,7 @@ static float mixl[APP_BLOCK], mixr[APP_BLOCK];
 #include "fx.c"                          /* the effects: two slots a track */
 _Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
 #include "looper.c"                      /* the looper on track 8 */
+#include "perform.c"                     /* PERFORM: SEL and a white key, an effect on everything */
 static float rb[APP_BLOCK];                  /* a track's voices that a take records (played by hand) */
 static float recf[NTRK][4];                  /* and the track's FILTER on them alone */
 static void seq_start_hook(void) { lp.bar = (uint8_t)(lp.bars - 1u); lp.resync = 1; }
@@ -1026,6 +1029,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             seq_bars++;
         last = seq_running ? seq_phase : 0.0f;
     }
+    perform_begin();
     if (arp.n || arp.on)
         arp_block(n);
     for (i = 0; i < n; i++)
@@ -1121,6 +1125,8 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
                 any = loop_block(tb, n, seq_bar_off, seq_running, pat, steer ? seq_phase : -1.0f, seq_dphase);
             }
             g_t *= 1.0f / 0.64f;                 /* (LEVEL at its 80: the loop as it was played) */
+            if (pf_rate * 12.0f < 1.0f)          /* (PERFORM's TAPE STOP: the loop is no tape, it fades as it stops) */
+                g_t *= pf_rate * 12.0f;
         } else {
             for (k = 0; k < NVOICE; k++)
                 if (voice[k].state != V_OFF && voice[k].track == t) {
@@ -1142,10 +1148,10 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
                                 continue;        /* (it starts later in the block) */
                             voice[k].delay = voice[k].delay > c0 ? voice[k].delay - c0 : 0u;
                             voice_render(&voice[k], (mine ? rb : tb) + c0, m, &ev,
-                                         tape_rate[t] * fm_exp2f(lv * lfo_d * lfo_d * (2.0f / 12.0f)));
+                                         tape_rate[t] * pf_rate * fm_exp2f(lv * lfo_d * lfo_d * (2.0f / 12.0f)));
                         }
                     } else {
-                        voice_render(&voice[k], mine ? rb : tb, n, &ev, tape_rate[t]);
+                        voice_render(&voice[k], mine ? rb : tb, n, &ev, tape_rate[t] * pf_rate);
                     }
                     any = 1;
                     on++;
@@ -1205,6 +1211,8 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         for (q = 0; q < 2u; q++)                 /* the shared effects: this track's part into their buses */
             if (FX_BUS[ft[q]] >= 0)
                 dry *= fx_send(ft[q], fs[q], fa[q], tb, n);
+        if (pf_run)                              /* PERFORM's sends: every track's, as much as its keys say */
+            dry *= perform_sends(tb, n);
         if (pan_t != 0.0f || bus[t].pan != 0.0f) {   /* the LFO's PAN: the side it leaves is turned down, to nothing at 100 */
             float pn = bus[t].pan;
             for (i = 0; i < n; i++) {
@@ -1235,6 +1243,14 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         if (d > fx_sf * 0.003f || -d > fx_sf * 0.003f)
             fx_sf = sf;
         fx_buses(mixl, mixr, n, fx_sf);
+    }
+    if (pf_run) {                                /* PERFORM: its effects on the whole mix */
+        int32_t boff = -1;
+        if (seq_running && seq_dphase > 0.0f) {  /* where in this block a step starts (the straight grid) */
+            const float at = seq_phase * (float)seq_len, to = ((float)((uint32_t)at + 1u) - at) / (seq_dphase * (float)seq_len);
+            boff = at - (float)(uint32_t)at < 0.0005f ? 0 : to < (float)n ? (int32_t)to : -1;
+        }
+        perform_mix(mixl, mixr, n, boff, ck_tick_frames() * 6.0f);
     }
     if (city_on) {                               /* the city view is up: the mix's level, left and right, for the kerbs */
         float pl = 0.0f, pr = 0.0f;
@@ -1400,6 +1416,7 @@ static int song_save(void)                   /* 0: kept */
     song_buf[9] = seq_sig;
     song_buf[10] = seq_swing;
     song_buf[11] = bt_on;
+    song_buf[12] = pf_latch;                 /* (3.99: a byte that was 0 before: an older song says OFF) */
     for (t = 0; t < NTRK; t++) {
         uint8_t *p = song_buf + 16u + t * SONG_TRK, *q = p + 8;
         const uint32_t li = trk[t].sound;
@@ -1444,6 +1461,7 @@ static int song_load(void)                   /* 1: a song was there and is in pl
     seq_len = SIG_LEN[seq_sig];
     seq_swing = (uint8_t)clamp(song_buf[10], 50, 75);
     bt_on = (uint8_t)(song_buf[11] != 0u);
+    pf_latch = (uint8_t)(song_buf[12] == 1u);
     for (t = 0; t < NTRK; t++) {
         const uint8_t *p = song_buf + 16u + t * SONG_TRK, *q = p + 8;
         const uint32_t id = rd32(p);
@@ -1481,6 +1499,8 @@ static void song_clear(void)                 /* the saved song gone, and the FM-
     seq_sig = 2;
     seq_len = NSTEP;
     seq_swing = 50;
+    pf_latch = 0;
+    perform_off();
     if (!bt_on) {
         bt_on = 1;
         plat_ble_enable(1);
@@ -1499,8 +1519,10 @@ void app_init(void)
     seq_swing = 50;
     bt_on = 1;
     bt_again = 0;
+    pf_latch = 0;
     memset(&arp, 0, sizeof arp);
     memset(rev_of, -1, sizeof rev_of);
+    perform_reset();
     memset(&cki, 0, sizeof cki);             /* and leads, at 120 */
     memset(&ck_tb, 0, sizeof ck_tb);
     memset(&ck_sent, 0, sizeof ck_sent);
@@ -1549,6 +1571,9 @@ static struct {
     uint32_t loop_seen;                  /* takes finished that the screen has said */
     uint32_t loop_drawn;                 /* the looper's state as the screen shows it */
     uint8_t redraw;
+    uint8_t perform;                     /* SEL is held: the keys are PERFORM's */
+    uint8_t pn, pstack[5];               /* PERFORM's buffer effects that are on, in the order they came (the last one plays) */
+    uint32_t pkeys;                      /* keys that went down for PERFORM (their letting go is no note's end) */
     uint8_t sv_fired;                    /* SAVE held long enough: it cleared (letting go is no save) */
     uint32_t sv_t;                       /* SAVE went down (0: not held) */
     uint32_t deaf_t;                     /* the knobs do nothing until they have rested 0.3 s (a turn closed the city view) */
@@ -1846,7 +1871,18 @@ static void knob_turn(uint32_t k, int32_t e)
         ui.redraw = 1;
         return;
     }
-    if (ui.page == PAGE_GLO) {               /* GLO: KNOB 1 Bluetooth on or off */
+    if (ui.page == PAGE_GLO) {               /* GLO: KNOB 1 Bluetooth on or off; KNOB 4 PERFORM's LATCH */
+        if (k == 3u) {
+            uint32_t to = e > 0;
+            ui.hot = 3;
+            ui.hot_t = plat_ms();
+            if (to != pf_latch) {
+                pf_latch = (uint8_t)to;
+                if (!to && !ui.perform)
+                    perform_off();           /* (LATCH off: what it held on goes off) */
+                app_say("PERFORM LATCH:", to ? "ON" : "OFF");
+            }
+        }
         if (k == 0u) {
             uint32_t to = e > 0;
             ui.hot = 0;
@@ -1965,13 +2001,49 @@ static void knob_turn(uint32_t k, int32_t e)
 
 #include "city.c"                         /* the city view: the sounds' levels as a street's lights */
 
+static const char *const PK_NAME[NPK][2] = {
+    {"REPEAT", "1/8"}, {"REPEAT", "1/16"}, {"REPEAT", "1/32"}, {"REVERSE", ""}, {"FREEZE", ""}, {"TAPE", "STOP"},
+    {"LOW-", "PASS"}, {"HIGH-", "PASS"}, {"FLANGER", ""}, {"PHASER", ""}, {"ROBOT", ""}, {"LO-FI", ""},
+    {"REVERB", "THROW"}, {"ECHO", "THROW"}, {"OCT", "DOWN"}, {"GATE", ""}};
+static uint32_t perform_lit(void)            /* the effects that are on, a bit each (PK_*) */
+{
+    uint32_t m = pf_on, i;
+    for (i = 0; i < ui.pn; i++)
+        m |= 1u << ui.pstack[i];
+    return m;
+}
+static uint32_t perform_take(void) { return lp.state != LP_IDLE || lp.req == LQ_ARM; }   /* a take: some keys wait */
+static void perform_set(uint32_t k, uint32_t on)     /* effect k on or off */
+{
+    uint32_t i, j;
+    if (k < 5u) {                            /* the buffer's: kept in the order they came; the last one plays */
+        for (i = j = 0; i < ui.pn; i++)
+            if (ui.pstack[i] != k)
+                ui.pstack[j++] = ui.pstack[i];
+        ui.pn = (uint8_t)j;
+        if (on && ui.pn < 5u)
+            ui.pstack[ui.pn++] = (uint8_t)k;
+        pf_buf = (uint8_t)(ui.pn ? 1u + ui.pstack[ui.pn - 1u] : 0u);
+    } else {
+        pf_on = (uint16_t)(on ? pf_on | 1u << k : pf_on & ~(1u << k));
+    }
+    ui.redraw = 1;
+}
+static void perform_off(void)                /* every effect off */
+{
+    pf_on = 0;
+    pf_buf = 0;
+    ui.pn = 0;
+    ui.redraw = 1;
+}
+
 #define SAVE_HOLD_MS 2000u                /* SAVE held this long clears the saved song */
 #define HOME_HOLD_MS 500u                 /* HOME held this long opens the city view */
 #define CITY_IDLE_MS 10000u               /* playing and nothing touched for this long: the city view */
 static void input(void)
 {
     static const uint8_t WK[16] = PLAT_WHITE_KEYS;
-    uint32_t keys, btn = plat_buttons(), k, pressed, released, lit_keys = 0, lit_btn;
+    uint32_t keys, btn = plat_buttons(), k, pressed, released, lit_keys = 0, lit_btn, pskip = 0;
     int32_t e;
     touch_poll();
     keys = touch_keys();
@@ -2010,10 +2082,60 @@ static void input(void)
     ui.wake &= btn;
     if (pressed)
         ui.idle_t = plat_ms();
+    /* PERFORM: while SEL is held the white keys are its sixteen effects (no notes, no MIDI, nothing for the looper or
+     * the steps). Held, an effect is on; with GLO's LATCH a press turns it on and the next one off, and it stays when
+     * SEL is let go. SEL with OCT-: every effect off */
+    if (pressed >> B_SEL & 1u) {
+        for (k = 0; k < NKEYS; k++)          /* the notes the keys held: let go */
+            if ((ui.keys >> k & 1u) && !(ui.pkeys >> k & 1u) && ui.page != PAGE_STEP && !on_t8l()) {
+                ev_put(QE_OFF, ui.trk_of[k], ui.note_of[k], 0);
+                if (ck_ble)
+                    plat_midi_send(0x08u | 0x80u << 8 | (uint32_t)ui.note_of[k] << 16, TO_BLE);
+            }
+        ui.pkeys |= ui.keys;
+        ui.held_step = -1;
+        ui.perform = 1;
+        ui.redraw = 1;
+    }
+    if ((released >> B_SEL & 1u) && ui.perform) {
+        ui.perform = 0;
+        if (!pf_latch)
+            perform_off();
+        ui.redraw = 1;
+    }
+    if (ui.perform && (pressed >> B_OCTDN & 1u)) {
+        perform_off();
+        app_say("PERFORM:", "ALL OFF");
+        pressed &= ~(1u << B_OCTDN);
+        ui.wake |= 1u << B_OCTDN;            /* (letting it go is no octave, no undo) */
+    }
+    for (k = 0; k < NKEYS && (ui.perform || ui.pkeys); k++) {
+        const uint32_t bit = 1u << k, down = (keys & bit) && !(ui.keys & bit), up = !(keys & bit) && (ui.keys & bit);
+        uint32_t s2;
+        for (s2 = 0; s2 < 16u && WK[s2] != k; s2++)
+            ;
+        if (up && (ui.pkeys & bit)) {        /* a key of PERFORM's let go (SEL held still or not) */
+            ui.pkeys &= ~bit;
+            if (s2 < 16u && !pf_latch)
+                perform_set(s2, 0);
+            pskip |= bit;                    /* (taken: the notes' part below does not see it) */
+        }
+        if (down && ui.perform) {
+            ui.pkeys |= bit;
+            if (s2 < 16u) {
+                if ((PK_NOTAKE >> s2 & 1u) && perform_take())
+                    app_say(PK_NAME[s2][0], "WAITS FOR THE TAKE");
+                else
+                    perform_set(s2, pf_latch ? !(perform_lit() >> s2 & 1u) : 1u);
+            }
+        }
+    }
 
     /* the keys: on the play page they play the selected track; on the step page the 16 white keys are the steps */
     for (k = 0; k < NKEYS; k++) {
         uint32_t bit = 1u << k, down = (keys & bit) && !(ui.keys & bit), up = !(keys & bit) && (ui.keys & bit);
+        if ((ui.pkeys | pskip) & bit)        /* PERFORM's: no note, no step */
+            continue;
         if (on_t8l()) {                      /* the looper's track: the keys are silent, and the screen says why */
             if (down)
                 say_t8l();
@@ -2108,7 +2230,7 @@ static void input(void)
     for (k = 0; k < NB; k++) {
         static const char *const BTN_NAME[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                                  "PLAY", "REC", "OCT-", "OCT+"};
-        if (!(pressed >> k & 1u) || k == B_OCTDN || k == B_OCTUP || k == B_SAVE || k == B_HOME)
+        if (!(pressed >> k & 1u) || k == B_OCTDN || k == B_OCTUP || k == B_SAVE || k == B_HOME || k == B_SEL)
             continue;
         if (k == B_REC && ui.page == PAGE_GLO) {     /* GLO's REC: the Bluetooth link dropped (it may come back) */
             if (!bt_on) {
@@ -2286,8 +2408,10 @@ static void page_words(uint32_t pg, char w[4][28], int32_t *pos)
         p4[3] = clamp((int32_t)(44100.0f * 15.0f / (ck_tick_frames() * 6.0f) + 0.5f) - 40, 0, 200) * 226 / 200;
     } else if (pg == 3u) {
         text_cat(w[0], bt_on ? "ON" : "OFF");
+        text_cat(w[3], pf_latch ? "ON" : "OFF");
         p4[0] = bt_on ? 226 : 0;
-        p4[1] = p4[2] = p4[3] = 0;
+        p4[1] = p4[2] = 0;
+        p4[3] = pf_latch ? 226 : 0;
     } else {
         text_cat(w[0], ARP_R_NAME[t->arp_r < NARP_R ? t->arp_r : 0u]);
         text_cat(w[1], ARP_M_NAME[t->arp_m < NARP_M ? t->arp_m : 0u]);
@@ -2321,6 +2445,10 @@ static void draw_header(void)
     } else if (now < ui.msg_until) {
         int32_t x = cv_text(6, 0, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
+    } else if (ui.perform) {                 /* SEL is held: the keys are PERFORM's */
+        cv_rect(0, 0, 76, 16, C_ORANGE);
+        cv_text(5, 0, &FONT_B, "PERFORM", C_BLACK);
+        cv_text(82, 2, &FONT_XS, pf_latch ? "LATCH: A KEY ON, AGAIN OFF" : "HOLD A WHITE KEY", C_HI);
     } else if (ui.loop_mode) {
         /* the looper's mode, plain to see: its name on a block, then where it stands */
         const char *w;
@@ -2386,6 +2514,32 @@ static void draw_header(void)
         int32_t w = text_w(&FONT_XS, "SOUND IN BURGER");
         cv_rect(240 - w - 10, 15, w + 10, 12, C_ORANGE);
         cv_text(240 - w - 5, 15, &FONT_XS, "SOUND IN BURGER", C_BLACK);
+    }
+    if (!ui.perform && perform_lit()) {      /* effects of PERFORM's are on with SEL let go (LATCH): never silently */
+        const uint32_t m = perform_lit();
+        uint32_t k2, cnt = 0, first = 0;
+        int32_t w, x0;
+        t[0] = 0;
+        for (k2 = 0; k2 < NPK; k2++)
+            if (m >> k2 & 1u) {
+                if (!cnt++)
+                    first = k2;
+            }
+        text_cat(t, PK_NAME[first][0]);
+        if (PK_NAME[first][1][0]) {
+            text_cat(t, " ");
+            text_cat(t, PK_NAME[first][1]);
+        }
+        if (cnt > 1u) {
+            char c2[4];
+            text_cat(t, " +");
+            int_text((int32_t)cnt - 1, c2);
+            text_cat(t, c2);
+        }
+        w = text_w(&FONT_XS, t);
+        x0 = stack_mute ? 4 : 240 - w - 10;  /* (right, as SOUND IN BURGER is; with that one up, left) */
+        cv_rect(x0, 15, w + 10, 12, C_WHITE);
+        cv_text(x0 + 5, 15, &FONT_XS, t, C_BLACK);
     }
     cv_rect(0, 27, 240, 1, C_LINE);
     cv_blit(0, 0);
@@ -2487,7 +2641,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     cv_rect(0, 0, 240, 1, C_LINE);
     if (ui.page >= PAGE_EDIT) {              /* the EDIT, ARP and GLO pages: their four knobs and their values */
         static const char *const N4[4][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
-                                             {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "", "", ""}};
+                                             {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "", "", "LATCH"}};
         static const char *const BACK[4] = {"EDIT: PAGE 2", "ARP: BACK TO THE TRACKS", "EDIT: BACK TO THE TRACKS",
                                             "GLO: BACK   REC: DISCONNECT"};
         const uint32_t pg = PG4(ui.page);
@@ -2731,7 +2885,7 @@ static void draw_lfo(void)
 static void draw_page4(uint32_t pg)
 {
     static const char *const NAME[4][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
-                                           {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "STATUS", "DISCONNECT", ""}};
+                                           {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "STATUS", "DISCONNECT", "PERFORM LATCH"}};
     const track_t *tr = &trk[ui.sel];
     const sound_t *snd = list_sound(tr->sound);
     const uint32_t t8 = !pg && on_t8l();
@@ -2792,13 +2946,37 @@ static void draw_page4(uint32_t pg)
         }
         cv_text(6, y, &FONT_B, NAME[pg][q], hot ? C_ORANGE : off ? C_GRAY : C_WHITE);
         cv_text(234 - text_w(&FONT_XS, w[q]), y + 1, &FONT_XS, w[q], off ? C_GRAY : C_HI);
-        if (pg != 3u || !q) {
+        if (pg != 3u || !q || q == 3u) {
             cv_rect(6, y + 20, 228, 1, C_DIM);   /* the knob's line */
             cv_rect(6, y + 19, pos[q], 3, off ? C_GRAY : C_ORANGE);
             cv_rect(6 + (pos[q] ? pos[q] - 1 : 0), y + 16, 3, 9, off ? C_GRAY : C_WHITE);
         }
         if (q & 1u)
             cv_blit(0, 28 + (q >> 1) * 80u);
+    }
+}
+
+/* PERFORM's overlay (SEL held): the sixteen white keys, left to right, four a row, each with its effect; the ones on
+ * lit, the ones that wait for a take dim */
+static void draw_perform(void)
+{
+    const uint32_t lit = perform_lit(), take = perform_take();
+    uint32_t k;
+    char n[4];
+    for (k = 0; k < NPK; k++) {
+        const int32_t x = 2 + (int32_t)(k % 4u) * 59, y = 2 + (int32_t)((k / 4u) % 2u) * 39;
+        const uint32_t on = lit >> k & 1u, dim = (PK_NOTAKE >> k & 1u) && take;
+        if (!(k % 8u))
+            cv_begin(240, 80, C_BLACK);
+        cv_rect(x, y, 57, 36, on ? C_ORANGE : dim ? C_LINE : C_GRAY);
+        if (!on)
+            cv_rect(x + 1, y + 1, 55, 34, C_BLACK);
+        int_text((int32_t)k + 1, n);
+        cv_text(x + 3, y + 1, &FONT_T, n, on ? C_BLACK : C_DIM);
+        cv_text(x + 12, y + 3, &FONT_XS, PK_NAME[k][0], on ? C_BLACK : dim ? C_DIM : C_WHITE);
+        cv_text(x + 12, y + 18, &FONT_XS, PK_NAME[k][1], on ? C_BLACK : dim ? C_DIM : C_HI);
+        if (k % 8u == 7u)
+            cv_blit(0, 28u + (k / 8u) * 80u);
     }
 }
 
@@ -2847,7 +3025,9 @@ static void draw_title(void)                 /* in the tracks' place; the keys, 
 static void draw(void)
 {
     draw_header();
-    if (ui.title)
+    if (ui.perform)
+        draw_perform();
+    else if (ui.title)
         draw_title();
     else if (ui.page == PAGE_FX)
         draw_fx();
@@ -2957,6 +3137,9 @@ void app_ui_init(void)
     ui.sv_t = ui.home_t = 0;
     ui.wake = 0;
     ui.deaf_t = 0;
+    ui.perform = 0;
+    ui.pn = 0;
+    ui.pkeys = 0;
     ui.idle_t = plat_ms();
     city.stage = 0;
     city_on = 0;
@@ -2978,6 +3161,24 @@ void app_frame(void)
     if (!song_drawn) {
         song_drawn = 1;
         ui.redraw = 1;
+    }
+    if (pf_undo_gone) {                      /* a buffer effect of PERFORM's took the block the looper's undo was in */
+        pf_undo_gone = 0;
+        app_say("PERFORM USED", "THE UNDO LAYER");
+    }
+    {
+        static uint8_t take_drawn;           /* (the overlay's dim keys follow the take) */
+        if (ui.perform && take_drawn != (uint8_t)perform_take())
+            ui.redraw = 1;
+        if (perform_take() && !take_drawn && (perform_lit() & PK_NOTAKE)) {
+            /* a take begins: the effects that must wait for it go off, and stay off until their keys are pressed
+             * again (a REPEAT that came back by itself after the take would take the new undo's block) */
+            pf_on = (uint16_t)(pf_on & ~PK_NOTAKE);
+            pf_buf = 0;
+            ui.pn = 0;
+            ui.redraw = 1;
+        }
+        take_drawn = (uint8_t)perform_take();
     }
     if (bt_again && now - bt_again >= 400u) {    /* DISCONNECT: Bluetooth on again, to be found and connected to */
         bt_again = 0;
@@ -3196,6 +3397,45 @@ int app_expect(const char *what, int *got)
             ;
         if (k < NVOICE)
             *got = what[2] == 'n' ? (int)voice[k].ni : (int)voice[k].ed;
+    }
+    else if (!strcmp(what, "perform"))       /* PERFORM: SEL is held */
+        *got = ui.perform;
+    else if (!strcmp(what, "pf_lit"))        /* its effects that are on: a bit each, key 1 the lowest */
+        *got = (int)perform_lit();
+    else if (!strcmp(what, "pf_buf"))        /* the buffer effect that plays: 0 none, else its key 1 .. 5 */
+        *got = pf_buf;
+    else if (!strcmp(what, "pf_ph"))         /* the buffer: 0 waits, 1 records, 2 plays */
+        *got = pb.cur ? pb.ph : -1;
+    else if (!strcmp(what, "pf_run"))
+        *got = pf_run;
+    else if (!strcmp(what, "pf_latch"))
+        *got = pf_latch;
+    else if (!strcmp(what, "pf_rate"))       /* the voices' rate, in 1/1000 */
+        *got = (int)(pf_rate * 1000.0f + 0.5f);
+    else if (!strcmp(what, "bench_perform")) {   /* host only: as bench_mid, with PERFORM's mix effects and sends all on */
+        static int32_t out[2 * APP_BLOCK];
+        uint32_t i, k, save = trk[0].sound;
+        clock_t t0;
+        for (k = 1; k <= NSOUNDS && (SOUNDS[k - 1].flags & (SF_PCM | SF_DRUM)) != 0; k++)
+            ;
+        trk[0].sound = (uint8_t)k;
+        pf_on = (uint16_t)(0xFFFFu & ~(PK_BUFFER | 1u << PK_TAPE | 1u << PK_OCT));
+        pf_buf = 1u + PK_REP16;
+        t0 = clock();
+        for (i = 0; i < 4000u; i++) {
+            for (k = 0; k < NVOICE; k++)
+                if (voice[k].state == V_OFF)
+                    voice_start(0, 60, 127, 0, 0, 0);
+            render_part(out, APP_BLOCK, 8300000.0f);
+        }
+        *got = (int)((double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 4000.0 * 10.0);
+        printf("  bench_perform: %.1f us a block of %u frames, %u voices, REPEAT and PERFORM's nine mix and send effects on (this computer, not an FM-1)\n",
+               *got / 10.0, (unsigned)APP_BLOCK, (unsigned)NVOICE);
+        for (i = 0; i < NVOICE; i++)
+            voice[i].state = V_OFF;
+        trk[0].sound = (uint8_t)save;
+        perform_off();
+        fx_reset();
     }
     else if (!strcmp(what, "city"))          /* the city view: 0 closed, 1 .. 3 fading in, 4 up */
         *got = city.stage;

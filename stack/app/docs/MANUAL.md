@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 3.97-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 3.99-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -193,7 +193,54 @@ Track 8 can be a looper. A loop is as long as one pattern.
 - If you change the tempo or the time signature, the loop no longer fits. The screen says `LOOP OUT OF TIME`.
   Clear the loop and record it again.
 
-## GLO: Bluetooth
+## PERFORM (hold SEL)
+
+![PERFORM: the sixteen keys and their effects](img/perform.png)
+
+Hold SEL. The screen shows the sixteen white keys and the effect on each. While you hold SEL, a white key is an
+effect on everything you hear, on all tracks at once. Hold the key: the effect is on. Let go: it is gone.
+
+| Key | Effect | What you hear |
+|---|---|---|
+| 1 | REPEAT 1/8 | The last eighth note, again and again. |
+| 2 | REPEAT 1/16 | The last sixteenth, again and again. |
+| 3 | REPEAT 1/32 | A very short piece, again and again. |
+| 4 | REVERSE | The music backwards, piece by piece. |
+| 5 | FREEZE | A short moment held as one long sound. |
+| 6 | TAPE STOP | Everything slows down and stops. Let go and it runs up again. |
+| 7 | LOW-PASS | Dark and muffled. |
+| 8 | HIGH-PASS | Thin, no bass. |
+| 9 | FLANGER | A fast sweeping jet sound. |
+| 10 | PHASER | A slow sweep. |
+| 11 | ROBOT | A metal robot voice on everything. |
+| 12 | LO-FI | Rough and crunchy. |
+| 13 | REVERB THROW | Everything goes into a big hall. |
+| 14 | ECHO THROW | Everything goes into a long echo. |
+| 15 | OCT DOWN | Everything one octave lower. |
+| 16 | GATE | Chopped in time: on and off every sixteenth. |
+
+- While you hold SEL the keys play no notes. Nothing is sent and nothing is recorded.
+- You can hold several keys. Different effects add up.
+- Keys 1 to 5 share one memory. Only one of them plays: the last one you pressed.
+- REPEAT and REVERSE start on the next step while the sequencer plays.
+- The effects follow the tempo.
+- TAPE STOP and OCT DOWN change the notes of the tracks. The loop on track 8 keeps its pitch.
+
+**PERFORM and the looper.** Keys 1 to 5 borrow memory from the looper.
+
+- While the looper records a layer, keys 1 to 6 and key 15 wait. They are dim on the screen.
+- If you use keys 1 to 5, the looper can no longer remove its last layer (OCT− short). The screen tells you once:
+  `PERFORM USED THE UNDO LAYER`. The loop itself is safe.
+
+**LATCH.** On the GLO page, K4 sets PERFORM LATCH to ON or OFF. It starts OFF.
+
+- With LATCH ON, hold SEL and press a key once: the effect stays on, also after you let go of SEL. Press the key
+  again (with SEL) to switch it off.
+- The top of the screen shows which effects are on, for example `REVERSE +2`.
+- SEL and OCT− together switch all effects off.
+- LATCH itself is saved by SAVE. The effects are never saved: after a restart they are all off.
+
+## GLO: Bluetooth and LATCH
 
 ![The GLO page](img/glo.png)
 
@@ -204,6 +251,7 @@ Press GLO to open the page. Press GLO again to go back.
 | K1 BLUETOOTH | ON or OFF. |
 | STATUS | CONNECTED, WAITING or OFF. |
 | REC | Disconnects. The FM-1 can then be found again. |
+| K4 PERFORM LATCH | ON or OFF. See PERFORM. |
 
 Over Bluetooth the FM-1 sends its key notes and its clock, and it plays notes it receives. A small `BT` in the top
 of the screen shows that something is connected. Samples and audio need the USB cable.
