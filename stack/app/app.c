@@ -1383,8 +1383,6 @@ static struct {
     uint32_t dn_t;                       /* OCT- went down in the looper's mode (0: not held) */
     uint32_t loop_seen;                  /* takes finished that the screen has said */
     uint32_t loop_drawn;                 /* the looper's state as the screen shows it */
-    uint8_t cpu;                         /* plat_cpu_pct, as drawn */
-    uint32_t cpu_t;
     uint8_t redraw;
 } ui;
 
@@ -2105,10 +2103,6 @@ static void draw_header(void)
         t[5] = (char)('0' + (ui.octave < 0 ? -ui.octave : ui.octave));
         t[6] = 0;
         cv_text(150, 2, &FONT_XS, t, C_GRAY);
-        t[0] = 0;                            /* the audio's share of the processor (a test version's readout) */
-        text_cat(t, "CPU ");
-        int_text((int32_t)ui.cpu, t + 4);
-        cv_text(104, 5, &FONT_T, t, ui.cpu >= 70u ? C_WHITE : C_DIM);
         cv_text(200, 2, &FONT_XS, seq_play_req ? "PLAY" : "STOP", seq_play_req ? C_HI : C_DIM);
     }
     {
@@ -2666,13 +2660,7 @@ static void my_frame(void)                   /* every frame: what the app's mess
                 n_ok += my[k].valid || my[k].cov;
             if (n_ok < NMY)
                 my_load_all();
-            if (++my_again == 2u) {                 /* then once: how many samples of the app's are here */
-                char c[4];
-                for (k = 0, n_ok = 0; k < NMY; k++)
-                    n_ok += my[k].valid;
-                int_text((int32_t)n_ok, c);
-                app_say("MY SAMPLES:", c);
-            }
+            my_again++;
         }
     }
     if (my_failed) {
@@ -2774,14 +2762,6 @@ void app_frame(void)
     if (ui.title && now - my_t0 >= TITLE_MS) {
         ui.title = 0;
         ui.redraw = 1;
-    }
-    if (now - ui.cpu_t >= 500u) {            /* the CPU readout, twice a second */
-        uint32_t c = plat_cpu_pct();
-        ui.cpu_t = now;
-        if (c != ui.cpu) {
-            ui.cpu = (uint8_t)(c > 255u ? 255u : c);
-            ui.redraw = 1;
-        }
     }
     if (seq_play_req != last_play || (ui.page == PAGE_STEP && seq_play_req && seq_step_now != last_step)) {
         last_play = seq_play_req;
