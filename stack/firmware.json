@@ -5,7 +5,7 @@
   "author": "Maker Hip",
   "license": "MPL-2.0",
   "tagline": "eight tracks of sounds, easy to follow",
-  "description": "A public beta: not everything is finished, and nothing is saved at power-off yet. Eight tracks, each one sound from 69 built-in sounds or a sample sent from the Burger Studio app; per track a DJ filter, envelope, LFO, sample edit, arpeggiator and two effects; a 16-step sequencer with swing, time signature and tempo; a looper on track 8; MIDI clock out or in over USB and Bluetooth MIDI; a limiter on the output. Please report what goes wrong.",
+  "description": "A public beta: not everything is finished, the loop and the app's samples are not kept at power-off; SAVE keeps the song. Eight tracks, each one sound from 69 built-in sounds or a sample sent from the Burger Studio app; per track a DJ filter, envelope, LFO, sample edit, arpeggiator and two effects; a 16-step sequencer with swing, time signature and tempo; a looper on track 8; MIDI clock out or in over USB and Bluetooth MIDI; a limiter on the output. Please report what goes wrong.",
   "tags": ["groovebox", "sampler"],
   "install": "https://github.com/perawoga2-coder/stack",
   "site": "https://github.com/perawoga2-coder/stack",

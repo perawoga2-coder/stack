@@ -238,6 +238,8 @@ static float lfo_wave(uint32_t shape, float p)   /* -1 .. 1 at p of a cycle (any
 static volatile uint8_t seq_len = NSTEP;     /* steps in the pattern: 8, 12, 14 or 16 */
 static volatile uint8_t seq_sig = 2;         /* SIG_NAME's */
 static volatile uint8_t seq_swing = 50;
+static volatile float trk_pk[NTRK];          /* each track's highest sample since the screen last looked (the city view: city.c) */
+static volatile uint8_t city_on;             /* the view is up: the audio interrupt keeps trk_pk */
 static uint8_t bt_on = 1;                    /* GLO's BLUETOOTH: on at every start (nothing is saved yet) */
 static uint32_t bt_again;                    /* GLO's DISCONNECT: when it was turned off, to be turned on again (0: not) */
 #define NSIG 5u
@@ -1192,6 +1194,13 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             if (anyr)
                 rec_in[i] += rb[i] * g;          /* the take hears it here: after LEVEL, before the effects */
         }
+        if (city_on) {                           /* the city view is up: this track's level for its sign */
+            float pk = 0.0f;
+            for (i = 0; i < n; i++)
+                pk = fm_fabsf(tb[i]) > pk ? fm_fabsf(tb[i]) : pk;
+            if (pk > trk_pk[t])
+                trk_pk[t] = pk;
+        }
         for (q = 0; q < 2u; q++)                 /* the shared effects: this track's part into their buses */
             if (FX_BUS[ft[q]] >= 0)
                 dry *= fx_send(ft[q], fs[q], fa[q], tb, n);
@@ -1323,6 +1332,149 @@ static void defaults(void)
 
 static uint8_t my_again;                     /* the scans after the start done so far (my_frame) */
 static uint32_t my_t0;                       /* plat_ms at the start */
+/* --- SAVE: the song kept in the flash (fm1-base's store, the object OBJ_SETTINGS: two sectors, a CRC, safe against
+ * a write cut short), when SAVE is pressed and only then. Kept: each track's sound, knobs, effects, envelope, LFO,
+ * EDIT pages, ARP and steps; the tempo, the time signature, the swing; Bluetooth on or off. Not kept: the loop (it
+ * is sound in the RAM) and the app's samples themselves. A built-in sound is kept by its name's hash, so the list may
+ * change between versions; a sample of the app's by its slot and its data's CRC: if that slot is empty or holds
+ * another sample at the next start, the track is EMPTY. A record of another version, or a damaged one, is left
+ * alone and the FM-1 starts as new. Writing the flash stops the sound for a moment: SAVE works while stopped --- */
+#define SONG_MAGIC 0x314B5453u               /* "STK1" */
+#define SONG_VER 1u
+#define SONG_TRK 68u                         /* bytes a track: its sound 8, its settings 25, its steps 16 and their notes 16 */
+#define SONG_LEN (16u + NTRK * SONG_TRK)
+static uint8_t song_buf[SONG_LEN];
+static struct { uint8_t slot; uint32_t crc; } song_my[NTRK];   /* a track waits for its sample (slot 1 + k; 0: none) */
+static uint8_t song_drawn = 1;               /* 0: a track got its sample, the screen is to show it */
+
+static uint32_t name_hash(const char *n)     /* FNV-1a, never 0 or a slot's mark */
+{
+    uint32_t h = 0x811C9DC5u;
+    while (*n)
+        h = (h ^ (uint8_t)*n++) * 0x01000193u;
+    return h < 16u ? h + 16u : h;
+}
+static uint32_t my_crc_of(uint32_t k)        /* the CRC a slot's header names for its data */
+{
+    const uint8_t *p = plat_data(MY_BASE + k * MY_SIZE);
+    return p && my[k].valid ? rd32(p + 20) : 0u;
+}
+static void put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+/* a track's settings, in the record's order: each one byte, with its least and its most (a record that says more is
+ * brought back inside) */
+#define SONG_FIELDS(T, F) \
+    F(T.pitch, -24, 24) F(T.filt, -FILT_MAX, FILT_MAX) F(T.decay, 0, 100) F(T.level, 0, 100) \
+    F(T.env_a, 0, 100) F(T.env_r, ENV_AUTO, 100) F(T.env_s, 0, 100) F(T.env_v, 0, 100) \
+    F(T.lfo_a, 0, 100) F(T.lfo_r, 0, (int32_t)NLFO_R - 1) F(T.lfo_t, 0, (int32_t)NLFO_T - 1) F(T.lfo_s, 0, (int32_t)NLFO_S - 1) \
+    F(T.ed_start, 0, 99) F(T.ed_rev, 0, 1) F(T.ed_loop, 0, 2) F(T.ed_len, 1, 100) F(T.fit, 0, (int32_t)NFIT - 1) \
+    F(T.arp_r, 0, (int32_t)NARP_R - 1) F(T.arp_m, 0, (int32_t)NARP_M - 1) F(T.arp_o, 1, 3) F(T.arp_g, 10, 100) \
+    F(T.fx[0], 0, (int32_t)NFX - 1) F(T.fx[1], 0, (int32_t)NFX - 1) F(T.fxk[0], -FX_MAX, FX_MAX) F(T.fxk[1], -FX_MAX, FX_MAX)
+
+static int song_save(void)                   /* 0: kept */
+{
+    uint32_t t, i;
+    memset(song_buf, 0, sizeof song_buf);
+    put32(song_buf, SONG_MAGIC);
+    song_buf[4] = SONG_VER;
+    song_buf[5] = (uint8_t)NTRK;
+    song_buf[6] = (uint8_t)SONG_TRK;
+    song_buf[8] = (uint8_t)clamp((int32_t)(44100.0f * 15.0f / seq_sf + 0.5f), 40, 240);
+    song_buf[9] = seq_sig;
+    song_buf[10] = seq_swing;
+    song_buf[11] = bt_on;
+    for (t = 0; t < NTRK; t++) {
+        uint8_t *p = song_buf + 16u + t * SONG_TRK, *q = p + 8;
+        const uint32_t li = trk[t].sound;
+        if (li >= 1u && li <= NSOUNDS) {
+            put32(p, name_hash(SOUNDS[li - 1u].name));
+        } else if (li > NSOUNDS && li < NLIST && my[li - NSOUNDS - 1u].valid) {
+            put32(p, li - NSOUNDS);              /* 1 .. 3: the app's slot, and whose sample it was */
+            put32(p + 4, my_crc_of(li - NSOUNDS - 1u));
+        }
+#define F(x, lo, hi) *q++ = (uint8_t)(x);
+        SONG_FIELDS(trk[t], F)
+#undef F
+        for (i = 0; i < NSTEP; i++) {
+            p[34u + i] = step_on[t][i] ? 1u : 0u;
+            p[50u + i] = step_note[t][i];
+        }
+    }
+    return plat_store_save(OBJ_SETTINGS, song_buf, SONG_LEN);
+}
+
+static void song_my_place(void)              /* the tracks that wait for a sample of the app's: is it there, the same? */
+{
+    uint32_t t;
+    for (t = 0; t < NTRK; t++)
+        if (song_my[t].slot && my[song_my[t].slot - 1u].valid && my_crc_of(song_my[t].slot - 1u) == song_my[t].crc &&
+            !trk[t].sound && !(t == NTRK - 1u && lp.own)) {
+            trk[t].sound = (uint8_t)(NSOUNDS + song_my[t].slot);
+            song_my[t].slot = 0;
+            song_drawn = 0;
+        }
+}
+
+static int song_load(void)                   /* 1: a song was there and is in place; 0: none (or not one of ours) */
+{
+    uint32_t t, i;
+    memset(song_my, 0, sizeof song_my);
+    if (plat_store_load(OBJ_SETTINGS, song_buf, SONG_LEN) != (int)SONG_LEN || rd32(song_buf) != SONG_MAGIC ||
+        song_buf[4] != SONG_VER || song_buf[5] != NTRK || song_buf[6] != SONG_TRK)
+        return 0;
+    seq_sf = 44100.0f * 60.0f / ((float)clamp(song_buf[8], 40, 240) * 4.0f);
+    seq_sig = (uint8_t)(song_buf[9] < NSIG ? song_buf[9] : 2u);
+    seq_len = SIG_LEN[seq_sig];
+    seq_swing = (uint8_t)clamp(song_buf[10], 50, 75);
+    bt_on = (uint8_t)(song_buf[11] != 0u);
+    for (t = 0; t < NTRK; t++) {
+        const uint8_t *p = song_buf + 16u + t * SONG_TRK, *q = p + 8;
+        const uint32_t id = rd32(p);
+        trk[t].sound = 0;
+        if (id >= 1u && id <= NMY) {             /* a sample of the app's: placed when (if) it is found */
+            song_my[t].slot = (uint8_t)id;
+            song_my[t].crc = rd32(p + 4);
+        } else if (id) {
+            for (i = 0; i < NSOUNDS && name_hash(SOUNDS[i].name) != id; i++)
+                ;
+            trk[t].sound = (uint8_t)(i < NSOUNDS ? i + 1u : 0u);     /* (a sound no longer in the list: EMPTY) */
+        }
+#define F(x, lo, hi) x = (__typeof__(x))clamp((lo) < 0 ? (int32_t)(int8_t)*q : (int32_t)*q, lo, hi); q++;
+        SONG_FIELDS(trk[t], F)
+#undef F
+        for (i = 0; i < NSTEP; i++) {
+            step_on[t][i] = (uint8_t)(p[34u + i] != 0u);
+            step_note[t][i] = (uint8_t)(p[50u + i] & 127u);
+        }
+    }
+    song_my_place();
+    return 1;
+}
+
+static void song_clear(void)                 /* the saved song gone, and the FM-1 as new */
+{
+    uint32_t t;
+    memset(song_buf, 0, 16);
+    plat_store_save(OBJ_SETTINGS, song_buf, 16);
+    memset(song_my, 0, sizeof song_my);
+    defaults();
+    for (t = 0; t < NVOICE; t++)
+        voice[t].state = V_OFF;
+    seq_sf = SEQ_SF_120;
+    seq_sig = 2;
+    seq_len = NSTEP;
+    seq_swing = 50;
+    if (!bt_on) {
+        bt_on = 1;
+        plat_ble_enable(1);
+    }
+}
+
 void app_init(void)
 {
     fx_reset();
@@ -1356,6 +1508,7 @@ void app_init(void)
     my_again = 0;
     my_load_all();                           /* the samples the app sent before (they stay in the flash) */
     defaults();
+    song_load();                             /* the song SAVE kept, if there is one */
 }
 
 /* --------------------------------------------------------------------- UI --- */
@@ -1384,6 +1537,12 @@ static struct {
     uint32_t loop_seen;                  /* takes finished that the screen has said */
     uint32_t loop_drawn;                 /* the looper's state as the screen shows it */
     uint8_t redraw;
+    uint8_t sv_fired;                    /* SAVE held long enough: it cleared (letting go is no save) */
+    uint32_t sv_t;                       /* SAVE went down (0: not held) */
+    uint32_t deaf_t;                     /* the knobs do nothing until they have rested 0.3 s (a turn closed the city view) */
+    uint32_t home_t;                     /* HOME went down (0: not held) */
+    uint32_t idle_t;                     /* the last button or knob */
+    uint32_t wake;                       /* buttons down when a touch closed the city view: they do nothing until let go */
 } ui;
 
 void app_say(const char *a, const char *b)
@@ -1792,6 +1951,11 @@ static void knob_turn(uint32_t k, int32_t e)
     ui.redraw = 1;
 }
 
+#include "city.c"                         /* the city view: the tracks' levels as a street's signs */
+
+#define SAVE_HOLD_MS 2000u                /* SAVE held this long clears the saved song */
+#define HOME_HOLD_MS 500u                 /* HOME held this long opens the city view */
+#define CITY_IDLE_MS 10000u               /* playing and nothing touched for this long: the city view */
 static void input(void)
 {
     static const uint8_t WK[16] = PLAT_WHITE_KEYS;
@@ -1801,6 +1965,39 @@ static void input(void)
     keys = touch_keys();
     pressed = btn & ~ui.btn;
     released = ~btn & ui.btn;
+    if (city.stage) {
+        /* the city view is up: the first button or knob only brings the page back, and does nothing else (a key
+         * too, where the keys are not the track's notes). The buttons down then are deaf until let go */
+        uint32_t any = pressed != 0u;
+        for (k = 0; k < NE; k++)
+            any |= plat_enc((int)k) != 0;
+        if (ui.page != PAGE_PLAY)
+            any |= (keys & ~ui.keys) != 0u;
+        if (any) {
+            city_close();
+            ui.wake = btn;
+            ui.idle_t = plat_ms();
+            ui.btn = btn;
+            ui.keys = ui.page != PAGE_PLAY ? keys : ui.keys;
+            ui.home_t = ui.sv_t = 0;
+            ui.deaf_t = plat_ms() | 1u;
+            return;
+        }
+    }
+    if (ui.deaf_t) {                         /* the turn that closed the view goes on: nothing of it counts */
+        uint32_t any = 0;
+        for (k = 0; k < NE; k++)
+            any |= plat_enc((int)k) != 0;
+        if (any)
+            ui.deaf_t = plat_ms() | 1u;
+        else if ((int32_t)(plat_ms() - ui.deaf_t) > 300)
+            ui.deaf_t = 0;
+    }
+    pressed &= ~ui.wake;
+    released &= ~ui.wake;
+    ui.wake &= btn;
+    if (pressed)
+        ui.idle_t = plat_ms();
 
     /* the keys: on the play page they play the selected track; on the step page the 16 white keys are the steps */
     for (k = 0; k < NKEYS; k++) {
@@ -1899,7 +2096,7 @@ static void input(void)
     for (k = 0; k < NB; k++) {
         static const char *const BTN_NAME[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                                  "PLAY", "REC", "OCT-", "OCT+"};
-        if (!(pressed >> k & 1u) || k == B_OCTDN || k == B_OCTUP)
+        if (!(pressed >> k & 1u) || k == B_OCTDN || k == B_OCTUP || k == B_SAVE || k == B_HOME)
             continue;
         if (k == B_REC && ui.page == PAGE_GLO) {     /* GLO's REC: the Bluetooth link dropped (it may come back) */
             if (!bt_on) {
@@ -1945,7 +2142,52 @@ static void input(void)
         }
     }
 
+    {   /* SAVE: let go, the song is kept; held SAVE_HOLD_MS, the saved song is cleared. Only while stopped: writing
+         * the flash stops the sound for a moment */
+        const uint32_t now = plat_ms();
+        if (pressed >> B_SAVE & 1u) {
+            ui.sv_t = now | 1u;
+            ui.sv_fired = 0;
+        }
+        if (ui.sv_t && (btn >> B_SAVE & 1u) && !ui.sv_fired && (int32_t)(now - ui.sv_t) >= (int32_t)SAVE_HOLD_MS) {
+            ui.sv_fired = 1;
+            if (seq_play_req) {
+                app_say("STOP TO CLEAR", "");
+            } else {
+                song_clear();
+                app_say("SAVED SONG CLEARED", "");
+            }
+        }
+        if (released >> B_SAVE & 1u) {
+            if (ui.sv_t && !ui.sv_fired) {
+                if (seq_play_req)
+                    app_say("STOP TO SAVE", "");
+                else if (song_save())
+                    app_say("NOT SAVED:", "FLASH ERROR");
+                else
+                    app_say("SAVED", "");
+            }
+            ui.sv_t = 0;
+            ui.redraw = 1;
+        }
+        if (ui.sv_t)
+            ui.redraw = 1;                   /* (the hold's bar grows) */
+        /* HOME held: the city view, at any time */
+        if (pressed >> B_HOME & 1u)
+            ui.home_t = now | 1u;
+        if (ui.home_t && (btn >> B_HOME & 1u) && (int32_t)(now - ui.home_t) >= (int32_t)HOME_HOLD_MS) {
+            ui.home_t = 0;
+            ui.wake |= 1u << B_HOME;         /* (letting it go does not close the view again) */
+            city_open(1);
+        }
+        if (released >> B_HOME & 1u) {
+            if (ui.home_t)
+                app_say("HOLD HOME:", "CITY VIEW");
+            ui.home_t = 0;
+        }
+    }
     if ((e = plat_enc(EN_ALGO)) != 0) {      /* ALGORITHM: the track; one detent a track, it stops at 1 and 8 */
+        ui.idle_t = plat_ms();
         int32_t to = clamp((int32_t)ui.sel + e, 0, (int32_t)NTRK - 1);
         if ((uint32_t)to != ui.sel) {
             ui.sel = (uint8_t)to;
@@ -1959,11 +2201,15 @@ static void input(void)
             }
         }
     }
-    if ((e = plat_enc(EN_PRESET)) != 0)
+    if ((e = plat_enc(EN_PRESET)) != 0) {
+        ui.idle_t = plat_ms();
         sound_turn(e);
+    }
     for (k = 0; k < 4u; k++)
-        if ((e = plat_enc((int)(EN_K1 + k))) != 0)
+        if ((e = plat_enc((int)(EN_K1 + k))) != 0) {
+            ui.idle_t = plat_ms();
             knob_turn(k, e);
+        }
     plat_enc(EN_SELECT);                     /* (no job in this version: its turns are not kept) */
 
     if (keys != ui.keys || btn != ui.btn)
@@ -2052,7 +2298,15 @@ static void draw_header(void)
     cv_begin(240, 28, C_BLACK);
     /* two lines: the first is the name row or a message; the second, small, is the version, always there (the build's
      * APP_VERSION: stack/VERSION, the one place it is written) */
-    if (now < ui.msg_until) {
+    if (ui.sv_t && !ui.sv_fired && (int32_t)(now - ui.sv_t) > 400) {
+        /* SAVE is being held: what it will do, and a bar that fills until it does */
+        const uint32_t held = now - ui.sv_t;
+        cv_rect(0, 0, 44, 16, C_ORANGE);
+        cv_text(5, 0, &FONT_B, "SAVE", C_BLACK);
+        cv_text(50, 2, &FONT_XS, "HOLD: CLEAR SAVED SONG", C_WHITE);
+        cv_rect(50, 20, 184, 5, C_LINE);
+        cv_rect(50, 20, (int32_t)(held >= SAVE_HOLD_MS ? 184u : held * 184u / SAVE_HOLD_MS), 5, C_WHITE);
+    } else if (now < ui.msg_until) {
         int32_t x = cv_text(6, 0, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
     } else if (ui.loop_mode) {
@@ -2660,7 +2914,9 @@ static void my_frame(void)                   /* every frame: what the app's mess
                 n_ok += my[k].valid || my[k].cov;
             if (n_ok < NMY)
                 my_load_all();
-            my_again++;
+            song_my_place();                        /* (a saved track's sample, found now) */
+            if (++my_again == 2u)
+                memset(song_my, 0, sizeof song_my); /* (not there at the last look: the track stays EMPTY) */
         }
     }
     if (my_failed) {
@@ -2686,6 +2942,14 @@ void app_ui_init(void)
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui.held_step = -1;
     ui.hot = -1;
+    ui.sv_t = ui.home_t = 0;
+    ui.wake = 0;
+    ui.deaf_t = 0;
+    ui.idle_t = plat_ms();
+    city.stage = 0;
+    city_on = 0;
+    if (!bt_on)                              /* (the saved song says Bluetooth off) */
+        plat_ble_enable(0);
     ui_sel_isr = ui.sel;
     ui.redraw = 1;
     app_say("STACK", APP_VERSION);
@@ -2699,6 +2963,10 @@ void app_frame(void)
     my_frame();
     if (mute_frame())
         ui.redraw = 1;
+    if (!song_drawn) {
+        song_drawn = 1;
+        ui.redraw = 1;
+    }
     if (bt_again && now - bt_again >= 400u) {    /* DISCONNECT: Bluetooth on again, to be found and connected to */
         bt_again = 0;
         if (bt_on)
@@ -2767,6 +3035,18 @@ void app_frame(void)
         last_play = seq_play_req;
         last_step = seq_step_now;
         ui.redraw = 1;
+    }
+    /* the city view: by itself while the pattern plays on the tracks' page and nothing has been touched for a while
+     * (never over another page, nor in the looper's mode, where the next press must count: its first touch only
+     * closes it); it goes when the pattern stops, unless HOME opened it */
+    if (!city.stage && seq_play_req && ui.page == PAGE_PLAY && !ui.title && !ui.loop_mode && lp.state == LP_IDLE &&
+        lp.req != LQ_ARM && !ui.sv_t && now - ui.idle_t >= CITY_IDLE_MS)
+        city_open(0);
+    if (city.stage && !city.manual && !seq_play_req)
+        city_close();
+    if (city.stage) {
+        city_frame(now);
+        return;                              /* (the page under it is drawn again when the view closes) */
     }
     if (ui.redraw) {
         ui.redraw = 0;
@@ -2904,6 +3184,39 @@ int app_expect(const char *what, int *got)
             ;
         if (k < NVOICE)
             *got = what[2] == 'n' ? (int)voice[k].ni : (int)voice[k].ed;
+    }
+    else if (!strcmp(what, "city"))          /* the city view: 0 closed, 1 .. 3 fading in, 4 up */
+        *got = city.stage;
+    else if (!strcmp(what, "city_lv"))       /* the selected track's sign: its level, in 1/1000 */
+        *got = (int)(city.lv[ui.sel] * 1000.0f);
+    else if (!strcmp(what, "song_junk")) {   /* host only: a record that is not a song put where the song is kept */
+        static uint8_t junk[SONG_LEN];
+        uint32_t i;
+        for (i = 0; i < SONG_LEN; i++)
+            junk[i] = (uint8_t)(i * 37u + 11u);
+        *got = plat_store_save(OBJ_SETTINGS, junk, SONG_LEN);
+    } else if (!strcmp(what, "song_old")) {  /* host only: a song of a version this one does not know */
+        song_save();
+        song_buf[4] = 99;
+        *got = plat_store_save(OBJ_SETTINGS, song_buf, SONG_LEN);
+    } else if (!strcmp(what, "song_wild")) { /* host only: a song whose every setting is out of range */
+        uint32_t i;
+        song_save();
+        for (i = 8; i < SONG_LEN; i++)
+            song_buf[i] = 0xEE;
+        *got = plat_store_save(OBJ_SETTINGS, song_buf, SONG_LEN);
+    } else if (!strcmp(what, "bench_city")) {    /* host only: microseconds to draw the city once, and its signs once */
+        clock_t t0 = clock();
+        uint32_t i;
+        for (i = 0; i < 50u; i++)
+            city_scene(256);
+        *got = (int)((double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 50.0);
+        t0 = clock();
+        for (i = 0; i < 500u; i++)
+            city_signs(i);
+        printf("  bench_city: the whole city %d us, its eight signs %.1f us (this computer, not an FM-1)\n", *got,
+               (double)(clock() - t0) * 1e6 / CLOCKS_PER_SEC / 500.0);
+        ui.redraw = 1;
     }
     else if (!strcmp(what, "swing"))         /* EDIT 2: SWING, the selected track's FIT, the time signature, the pattern's steps, the tempo */
         *got = seq_swing;

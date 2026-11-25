@@ -1,0 +1,255 @@
+# STACK in the host simulator: SAVE (the song kept in the flash) and what a start does with it.
+#   app/build/host/stack_host app/tests/save.txt app/build/host
+master 4096
+wait 2200
+# nothing saved: the FM-1 as new
+expect track 1
+expect sound 1
+expect store_writes 0
+# --- a song: track 5 the organ, its knobs, an effect, the envelope, the LFO, both EDIT pages, the ARP, steps on track 1
+tap SEQ
+wait 40
+key w0 down 100
+wait 20
+key w0 up
+wait 20
+key w6 down 100
+wait 20
+key w6 up
+wait 40
+tap SEQ
+wait 40
+turn ALGO 4
+wait 40
+turn PRESET 4
+wait 60
+expect sound 37
+turn K1 3
+turn K2 -12
+turn K3 20
+turn K4 -30
+wait 40
+tap FX
+wait 40
+turn K1 2
+turn K2 30
+wait 40
+expect fxa 2
+tap FX
+wait 40
+tap ENV
+wait 40
+turn K1 25
+turn K3 -40
+wait 40
+tap ENV
+wait 40
+tap LFO
+wait 40
+turn K1 45
+turn K2 -2
+turn K3 2
+turn K4 3
+wait 40
+tap LFO
+wait 40
+tap EDIT
+wait 40
+turn K1 20
+turn K2 1
+turn K4 -40
+wait 40
+tap EDIT
+wait 40
+turn K1 12
+turn K2 3
+turn K3 -1
+turn K4 -20
+wait 40
+expect swing 62
+expect fit 3
+expect sig 1
+expect clk_bpm10 1000
+tap EDIT
+wait 40
+tap ARP
+wait 40
+turn K1 5
+turn K2 2
+turn K3 1
+turn K4 30
+wait 40
+tap ARP
+wait 40
+tap GLO
+wait 40
+turn K1 -1
+wait 100
+expect bt_on 0
+tap GLO
+wait 40
+# SAVE while it plays: not saved (writing the flash would stop the sound), and the screen says STOP TO SAVE
+tap PLAY
+wait 200
+tap SAVE
+wait 100
+expect store_writes 0
+shot save_stop_first.png
+tap PLAY
+wait 200
+# stopped: SAVE keeps it
+tap SAVE
+wait 100
+expect store_writes 1
+shot save_saved.png
+# changes after it are not kept (no saving by itself)
+turn K1 -3
+wait 40
+expect store_writes 1
+# --- a restart: everything as it was saved
+reboot
+wait 2200
+expect store_writes 1
+turn ALGO -8
+wait 40
+turn ALGO 4
+wait 40
+expect track 5
+expect sound 37
+expect pitch 3
+expect filt -12
+expect decay 70
+expect level 50
+expect fxa 2
+expect fxak 30
+expect env_a 25
+expect env_s 60
+expect lfo_a 45
+expect lfo_r 4
+expect lfo_t 2
+expect lfo_s 3
+expect ed_start 20
+expect ed_rev 1
+expect ed_len 60
+expect swing 62
+expect fit 3
+expect sig 1
+expect seq_len 12
+expect clk_bpm10 1000
+expect arp_r 5
+expect arp_m 2
+expect arp_o 2
+expect arp_g 80
+expect bt_on 0
+turn ALGO -8
+wait 40
+expect step1 60
+expect step7 60
+expect step2 0
+shot save_loaded.png
+# and after a power-off
+power
+wait 2200
+turn ALGO -8
+wait 40
+turn ALGO 4
+wait 40
+expect sound 37
+expect swing 62
+expect bt_on 0
+# --- SAVE held 2 s: a bar fills, then the saved song is cleared and the FM-1 is as new; a restart finds nothing
+press SAVE
+wait 1000
+shot save_hold_bar.png
+expect sound 37
+wait 1200
+release SAVE
+wait 100
+shot save_cleared.png
+expect sound 33
+expect swing 50
+expect sig 2
+expect seq_len 16
+expect clk_bpm10 1200
+expect bt_on 1
+expect lfo_a 0
+expect store_writes 2
+reboot
+wait 2200
+turn ALGO -8
+wait 40
+turn ALGO 4
+wait 40
+expect sound 33
+expect swing 50
+expect clk_bpm10 1200
+# SAVE held while it plays: nothing is cleared
+tap SAVE
+wait 100
+expect store_writes 3
+tap PLAY
+wait 100
+press SAVE
+wait 2300
+release SAVE
+wait 100
+expect store_writes 3
+tap PLAY
+wait 200
+# --- a record that is not a song (damaged): left alone, the FM-1 starts as new
+turn K1 5
+wait 40
+tap SAVE
+wait 100
+expect song_junk 0
+reboot
+wait 2200
+turn ALGO -8
+wait 40
+turn ALGO 4
+wait 40
+expect sound 33
+expect pitch 0
+expect seq_len 16
+expect clk_bpm10 1200
+# a song of a version this one does not know: left alone too
+turn K1 5
+wait 40
+expect song_old 0
+reboot
+wait 2200
+turn ALGO -8
+wait 40
+turn ALGO 4
+wait 40
+expect pitch 0
+expect sound 33
+# a song whose every value is out of range: each is brought inside, nothing breaks
+expect song_wild 0
+reboot
+wait 2200
+expect seq_len 16
+expect swing 75
+expect clk_bpm10 2380
+turn ALGO -8
+wait 40
+turn ALGO 4
+wait 40
+expect sound 0
+expect level 100
+expect lfo_r 10
+expect arp_o 3
+key w4 down 100
+wait 100
+key w4 up
+tap PLAY
+wait 500
+tap PLAY
+wait 200
+expect lim_clips 0
+# cleared again for whoever comes next
+press SAVE
+wait 2300
+release SAVE
+wait 100
+expect sound 33

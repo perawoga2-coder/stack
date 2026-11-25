@@ -1,0 +1,183 @@
+# STACK in the host simulator: the city view (the tracks' levels as a street's signs).
+#   app/build/host/stack_host app/tests/city.txt app/build/host
+master 4096
+wait 2200
+# a pattern: the kick on four steps of track 1
+tap SEQ
+wait 40
+key w0 down 100
+wait 20
+key w0 up
+key w4 down 100
+wait 20
+key w4 up
+key w8 down 100
+wait 20
+key w8 up
+key w12 down 100
+wait 20
+key w12 up
+wait 40
+tap SEQ
+wait 40
+# stopped: it never comes by itself
+wait 12000
+expect city 0
+# playing, nothing touched: after 10 s it fades in
+tap PLAY
+wait 9500
+expect city 0
+wait 700
+expect city >0
+wait 500
+expect city 4
+wait 300
+expect city_lv >50
+shot city_playing.png
+# the keys play on under it, and do not close it
+turn ALGO 0
+key w4 down 100
+wait 100
+expect city 4
+key w4 up
+wait 100
+# a knob closes it and changes nothing: PITCH stays 0
+expect pitch 0
+turn K1 5
+wait 40
+expect city 0
+expect pitch 0
+shot city_closed.png
+# the next turn works as always
+wait 400
+turn K1 2
+wait 40
+expect pitch 2
+turn K1 -2
+wait 40
+# again; a button closes it and does nothing else: PLAY does not stop the pattern, FX opens no page
+wait 10600
+expect city 4
+tap PLAY
+wait 40
+expect city 0
+expect playing 1
+wait 10600
+expect city 4
+tap FX
+wait 40
+expect city 0
+expect page 0
+# OCT+ (it acts when let go) does not move the octave either
+wait 10600
+expect city 4
+tap OCT+
+wait 40
+expect city 0
+expect octave 0
+# a touch starts the 10 s again
+wait 6000
+turn K4 1
+wait 400
+turn K4 -1
+wait 6000
+expect city 0
+wait 5000
+expect city 4
+# the pattern stops (a clock's Stop would do the same): it goes by itself
+tap PLAY
+wait 40
+expect city 0
+tap PLAY
+wait 200
+expect playing 0
+# --- never over another page: the FX page, playing, 12 s
+tap PLAY
+wait 100
+tap FX
+wait 40
+expect page 2
+wait 12000
+expect city 0
+tap FX
+wait 40
+tap SEQ
+wait 12000
+expect city 0
+tap SEQ
+wait 40
+# nor around a take of the looper
+press OCT-
+press OCT+
+wait 60
+release OCT+
+release OCT-
+wait 60
+expect loop_mode 1
+wait 9000
+tap OCT+
+wait 100
+expect loop_state >0
+wait 1500
+expect city 0
+wait 3000
+expect city 0
+expect loop_layers 1
+# in the looper's mode it never comes by itself (there the next press must count)
+wait 11000
+expect city 0
+# out of the mode, the loop playing on: it comes; track 8's sign is the looper's
+press OCT-
+press OCT+
+wait 60
+release OCT+
+release OCT-
+wait 60
+expect loop_mode 0
+wait 10600
+expect city 4
+shot city_looper.png
+turn K4 1
+wait 40
+expect city 0
+tap PLAY
+wait 200
+expect playing 0
+# --- HOME held: it opens at any time, stopped too, over any page; a touch closes it
+press HOME
+wait 300
+expect city 0
+wait 400
+expect city >0
+release HOME
+wait 600
+expect city 4
+shot city_stopped.png
+wait 3000
+expect city 4
+tap ENV
+wait 40
+expect city 0
+expect page 0
+tap ENV
+wait 40
+expect page 3
+press HOME
+wait 700
+release HOME
+wait 500
+expect city 4
+key w4 down 100
+wait 40
+expect city 0
+key w4 up
+expect page 3
+tap ENV
+wait 40
+# HOME tapped: nothing but a word
+tap HOME
+wait 40
+expect city 0
+expect lim_clips 0
+expect store_writes 0
+expect bench_city >0
