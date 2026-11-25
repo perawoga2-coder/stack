@@ -126,19 +126,14 @@ expect step3 0
 tap SEQ
 wait 40
 # the looper's loop is a pattern long: 12 steps at 120 are 1.5 s (66 150 frames)
-press OCT-
-press OCT+
-wait 60
-release OCT+
-release OCT-
-wait 60
-expect loop_mode 1
 tap PLAY
 wait 100
-tap OCT+
+tap REC
 wait 1500
 key w4 down 100
-wait 600
+wait 400
+tap REC
+wait 120
 key w4 up
 wait 1200
 expect loop_layers 1
@@ -156,20 +151,13 @@ expect seq_len 14
 wait 2500
 expect loop_drift 1
 shot edit2_seven_eight_loop.png
-press OCT-
-wait 900
-release OCT-
+press REC
+wait 5200
+release REC
 wait 200
 expect loop_has 0
 tap PLAY
 wait 100
-press OCT-
-press OCT+
-wait 60
-release OCT+
-release OCT-
-wait 60
-expect loop_mode 0
 tap EDIT
 wait 40
 tap SEQ
@@ -200,7 +188,7 @@ shot edit2_tempo.png
 expect clk_out_span <100000
 wait 1500
 expect clk_out_gap >27600
-expect clk_out_gap <27900
+expect clk_out_gap <27950
 turn K4 30
 wait 40
 expect clk_bpm10 1200

@@ -105,11 +105,10 @@ up()
 many("tap PLAY", "wait 100",
      "# --- the looper records it: a take of the ARP, then the loop plays it with no key down",
      "turn K1 -2", "wait 40", "expect arp_r 3",
-     "press OCT-", "press OCT+", "wait 60", "release OCT+", "release OCT-", "wait 60", "expect loop_mode 1",
-     "tap PLAY", "wait 100", "tap OCT+", "wait 100", "expect loop_state 1", "wav arp_in_the_loop.wav",
+     "tap PLAY", "wait 100", "tap REC", "wait 100", "expect loop_state 1", "wav arp_in_the_loop.wav",
      "wait 1700", "expect loop_state 2")
 chord()
-A("wait 1500")
+many("wait 800", "tap REC", "wait 620")      # (REC again: the layer ends with this bar)
 up()
 many("wait 800", "expect loop_layers 1", "expect loop_state 0", "expect voices 0", "peakreset", "wait 1500",
      "expect peak_db_min -40", "wavstop", "tap PLAY", "wait 200",

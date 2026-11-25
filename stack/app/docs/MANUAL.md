@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.0-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.02-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -16,7 +16,7 @@ STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for v
 ## The idea
 
 STACK has eight tracks. Each track plays one sound. You pick a track, pick its sound, and play it with the keys.
-A 16-step sequencer plays the tracks for you. Track 8 can become a looper that records what you play.
+A 16-step sequencer plays the tracks for you. Track 8 can become a looper that records what you play: press REC.
 
 ## The play page
 
@@ -36,7 +36,8 @@ This is the page you see after the start. It lists the eight tracks, T1 to T8.
 | K4 LEVEL | The track's volume. |
 | MASTER | The volume of the FM-1's speaker and headphone jack. |
 | PLAY | Starts and stops the sequencer. |
-| REC | Undo: puts back the sound a track had before your last turn of PRESETS. |
+| SELECT knob | The tempo, 40 to 240 BPM. One click is 1 BPM. It works on every page. |
+| REC | The looper. A short press records a layer. See "The looper (REC)". |
 
 ### The sound list
 
@@ -48,10 +49,13 @@ group and the place, for example `KEYS 3/15`.
 
 Tracks 1 to 6 start with a sound. Tracks 7 and 8 start EMPTY.
 
-### REC: undo the sound
+### SELECT: the tempo
 
-If you turn PRESETS by mistake, press REC. The track gets back the sound it had. The REC light is on while there is
-something to undo.
+Turn the SELECT knob to change the tempo. One click is 1 BPM, from 40 to 240. The top of the screen shows the new
+tempo for a moment. It is the same tempo as K4 on EDIT page 2, and it works on every page.
+
+When the FM-1 follows a clock from outside, that clock sets the tempo. SELECT then changes nothing, and the screen
+says who leads.
 
 ## The step page (SEQ)
 
@@ -149,6 +153,8 @@ Press EDIT again to open page 2. Press EDIT once more to go back to the tracks.
 | K3 TIME SIG | 2/4, 3/4, 4/4, 6/8 or 7/8. It sets the number of steps. For all tracks. |
 | K4 TEMPO | 40 to 240 BPM. For all tracks. |
 
+The SELECT knob changes the same tempo, on every page.
+
 When the FM-1 follows a clock from outside, that clock sets the tempo and K4 does nothing.
 
 ## ARP
@@ -166,29 +172,46 @@ Press ARP to open the page. Press ARP again to go back. The arpeggiator plays th
 
 Hold a chord and it runs. Let go and it stops. It runs in time with the sequencer.
 
-## The looper (OCT− and OCT+ together)
+## The looper (REC)
 
-![Looper mode](img/looper.png)
+![The looper records a layer](img/looper.png)
 
-Track 8 can be a looper. A loop is as long as one pattern.
+Track 8 can be a looper. It records what you play and plays it back in a loop, in time with the sequencer.
+There is no looper mode: the REC button does everything, on every page except GLO.
 
-1. Press OCT− and OCT+ **together**. The screen shows LOOPER. Track 8 shows T8L.
-2. Press PLAY.
-3. Select a track from T1 to T7.
-4. Press OCT+. Recording starts at the next bar and stops by itself after one pattern.
-5. Play the keys while it records. What you play becomes a layer of the loop.
-6. Press OCT+ again to add another layer.
+1. Press PLAY. The looper only records while the sequencer runs.
+2. Select a track from T1 to T7.
+3. Press REC shortly. The REC light blinks. Recording starts at the next bar, and the light stays on.
+4. Play the keys. What you play becomes the first layer of the loop.
+5. Press REC shortly again. Recording stops at the end of the bar you are in. The loop starts to play.
+6. To add a layer, press REC shortly again. It starts at the next bar. It stops by itself after one round of the
+   loop, or at the end of the bar when you press REC before that.
 
-| Control (in looper mode) | What it does |
+| REC | What it does |
 |---|---|
-| OCT+ | Records one more layer. |
-| OCT− (short) | Removes the last layer. Only one layer can be removed. |
-| OCT− (hold) | Clears the whole loop. A bar fills while you hold. |
-| OCT− and OCT+ together | Leaves looper mode. The loop keeps playing. |
+| Short press (less than half a second) | Starts a layer at the next bar. While it records: stops it at the end of the bar. |
+| Short press while the light blinks | Cancels the layer that waits for its bar. |
+| Hold 3 seconds, then let go | Removes the last layer. Only one layer can be removed. |
+| Hold 5 seconds | Clears the whole loop. It happens at 5 seconds; you do not have to let go. |
+| Hold less than 3 seconds, then let go | Nothing. |
 
+While you hold REC, a bar fills at the top of the screen. A mark shows the 3 seconds, and the text says what will
+happen when you let go.
+
+- **The length of the loop** is set by the first layer: the whole bars from its start to the bar where you
+  pressed REC again. Later layers have that same length.
+- **The memory holds 4 seconds.** At 120 BPM that is 2 bars; at 240 BPM it is 4 bars. When the memory is full, the
+  first layer stops by itself and the screen says `LOOP FULL`.
+- A loop of up to 2 seconds is recorded at full quality. A longer one is recorded at half quality (11 kHz, a
+  duller sound). The screen says so.
+- If one bar is longer than 4 seconds (4/4 below 60 BPM), the looper cannot record. The screen says
+  `PATTERN TOO LONG TO LOOP`.
 - Only what you play by hand is recorded. The sequencer's own steps are not recorded.
-- If track 8 already has a sound, the screen says `TRACK 8 IN USE`. Hold OCT− to clear track 8 first.
-- On T8L the keys are silent. Select T1 to T7 to play.
+- While a loop exists, track 8 shows T8L and plays the loop. Track 8's own sound and steps are silent then. They
+  come back when you clear the loop.
+- On T8L the keys are silent. Select T1 to T7 to play. The knobs, FX and MUTE of track 8 work on the loop.
+- If you hold REC for 3 seconds while a layer records, that layer is cancelled.
+- Starting a new layer means the layer before it can no longer be removed.
 - The loop is gone when you switch off.
 - If you change the tempo or the time signature, the loop no longer fits. The screen says `LOOP OUT OF TIME`.
   Clear the loop and record it again.
@@ -229,7 +252,7 @@ effect on everything you hear, on all tracks at once. Hold the key: the effect i
 **PERFORM and the looper.** Keys 1 to 5 borrow memory from the looper.
 
 - While the looper records a layer, keys 1 to 6 and key 15 wait. They are dim on the screen.
-- If you use keys 1 to 5, the looper can no longer remove its last layer (OCT− short). The screen tells you once:
+- If you use keys 1 to 5, the looper can no longer remove its last layer (REC held 3 seconds). The screen tells you once:
   `PERFORM USED THE UNDO LAYER`. The loop itself is safe.
 
 **LATCH.** On the GLO page, K4 sets PERFORM LATCH to ON or OFF. It starts OFF.
@@ -330,4 +353,5 @@ is the right channel. They run from the far end towards you. Green is quiet, yel
 - Press any button or turn any knob to go back. That first touch only brings the page back. It changes nothing.
 - The keys still play while the city shows.
 - Hold HOME to open the city view at any time.
-- It does not appear on the other pages or in looper mode.
+- It does not appear on the other pages, while the looper records, or while you hold REC.
+- REC is the exception to the first touch: it closes the city view and counts at once, so a layer starts on time.

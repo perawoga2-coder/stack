@@ -627,26 +627,25 @@ wait 60
 expect sound 37
 tap SEQ
 wait 40
-press OCT-
-press OCT+
-wait 60
-release OCT+
-release OCT-
-wait 60
-expect loop_mode 1
 clock 48 20
 clock 1 18
 midi FA 00 00
 clock 20 20
 # a take, from the next bar (tick 96); a note held across its end, the loop's point
 clock 1 18
-press OCT+
+press REC
 clock 1 18
-release OCT+
+release REC
 clock 73 20
 wav clock_loop.wav
-clock 40 20
+clock 20 20
 expect loop_state 2
+# (REC again: it ends with the bar it is in, tick 192)
+clock 1 18
+press REC
+clock 1 18
+release REC
+clock 18 20
 clock 1 18
 key 7 down 100
 clock 80 20

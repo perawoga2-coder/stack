@@ -243,13 +243,10 @@ expect lim_clips 0
 turn ALGO 7
 wait 40
 expect track 8
-press OCT-
-press OCT+
+tap PLAY
 wait 60
-release OCT+
-release OCT-
+tap REC
 wait 60
-expect loop_mode 1
 expect loop_own 1
 tap EDIT
 wait 40
@@ -266,3 +263,8 @@ expect page 7
 tap EDIT
 wait 40
 expect page 0
+tap REC
+wait 60
+tap PLAY
+wait 200
+expect loop_own 0

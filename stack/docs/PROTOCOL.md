@@ -122,8 +122,8 @@ sends nothing.
 
 ### The looper and the clock
 
-A loop on the FM-1 is recorded sound: it is as long as one pattern at the tempo it was recorded at, and it does not
-stretch. Under the app's clock it is kept on the bar by playing up to 0.1 % faster or slower, which covers the small
+A loop on the FM-1 is recorded sound: it is a whole number of bars long (since 4.02-beta; one pattern before) at
+the tempo it was recorded at, and it does not stretch. Under the app's clock it is kept on the bar by playing up to 0.1 % faster or slower, which covers the small
 drift between two devices. **A real change of tempo in the app while a loop exists puts the loop out of time**; the
 FM-1 shows `TEMPO CHANGED: LOOP OUT OF TIME` and plays on. So the app should not change tempo under a loop without
 telling the user (or the user clears the loop and records again).
@@ -256,8 +256,10 @@ The 25 settings, in order (signed ones are two's complement):
 
 - `<has>`: 1 a loop plays on track 8, 0 none (the rest is then 0).
 - `<rate>`: 0 the loop is at 22 050 Hz, 1 at 11 025 Hz. Mono.
-- `<n>`: its samples (21 bits). Its length in seconds is n / rate; it is one pattern long at the tempo it was
-  recorded at.
+- `<n>`: its samples (21 bits). Its length in seconds is n / rate. Up to 4.01-beta it is one pattern long at the
+  tempo it was recorded at. **Since 4.02-beta it is a whole number of bars (patterns) long**, one or more, up to
+  4 s: the number of bars is not sent; it is n / rate divided by the pattern's length at the song's tempo and time
+  signature, rounded. An app that fits the loop to one bar must fit it to that many.
 - `<ver>`: a number (14 bits) that changes whenever the loop that plays is another one: a layer added, an undo, a
   clear.
 - CRC: CRC-32 of the loop's 2 × n data bytes.

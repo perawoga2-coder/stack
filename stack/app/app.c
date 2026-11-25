@@ -6,9 +6,11 @@
 /* STACK. Eight tracks, each with one sound picked from a single list; the keys play the selected track.
  *   ALGORITHM  the track, 1..8 (it stops at the ends)
  *   PRESETS    the selected track's sound, from one list that stops at its ends; nothing else changes
- *   REC        UNDO SOUND: the sound the track had before the last turn of PRESETS (lit while there is one)
+ *   REC        the looper (looper.c): a short press starts a layer at the next bar, or ends the one recording with its bar;
+ *              held and let go after 3 s: the last layer undone; held 5 s: the loop cleared. (On GLO: disconnect.)
+ *   SELECT     the tempo, 1 BPM a detent, 40..240, on every page (the same value as EDIT page 2's K4)
  *   KNOB 1..4  the selected track's PITCH, FILTER (left low-pass, the middle off, right high-pass), DECAY, LEVEL
- *   OCT- OCT+  the keys' octave, on release; both together are kept for the looper (not in this version)
+ *   OCT- OCT+  the keys' octave, on release
  *   PLAY       play / stop the steps;  SEQ  the step page and back (16 steps a track, the white keys)
  * Samples sent by the Burger Studio app come into MY 1 .. MY 3, at the end of the list (my_samples.c).
  * No randomness anywhere: the same press gives the same result. The tracks and steps are not saved; the flash is
@@ -162,7 +164,11 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and th
 #define ENV_AUTO (-1)                    /* RELEASE as before the ENV page: a held sound lets go at DECAY's pace, a hit
                                           * plays through */
 #define ENV_V_START 75                   /* VELOCITY as before: a quarter of the loudness fixed, the rest the finger's */
-#define LOOP_HOLD_MS 700u                /* OCT- held this long in the looper's mode clears */
+#define REC_SHORT_MS 500u                /* REC let go before this: a short press (a layer starts, or ends) */
+#define REC_UNDO_MS 3000u                /* REC let go after this: the last layer goes */
+#define REC_CLEAR_MS 5000u               /* REC held this long: the whole loop goes */
+/* the header says what REC is doing: it is held past a short press, or a take waits or runs */
+#define REC_UP ((ui.rec_t && !ui.rec_fired && (int32_t)(plat_ms() - ui.rec_t) >= (int32_t)REC_SHORT_MS) || lp.state != LP_IDLE || lp.req == LQ_ARM)
 #define NTRK 8u
 #define NSTEP 16u
 #define FILT_DEAD 3                      /* FILTER: -FILT_DEAD .. +FILT_DEAD is off (seven detents wide) */
@@ -1121,8 +1127,12 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             {   /* the loop holds to the bar by its own count while the FM-1 leads at 120 and the loop is a pattern of
                  * that long; else (a clock in, or a tempo taken from one) it is steered to the bar: looper.c */
                 const uint32_t pat = pat_frames();
-                const int steer = lp.bars == 1u && (ck_follow || seq_sf != SEQ_SF_120 || (lp.total && lp.total != pat));
-                any = loop_block(tb, n, seq_bar_off, seq_running, pat, steer ? seq_phase : -1.0f, seq_dphase);
+                const int steer = ck_follow || seq_sf != SEQ_SF_120 || (lp.total && lp.total != pat * lp.bars);
+                any = loop_block(tb, n, seq_bar_off, seq_running, pat,
+                                 seq_dphase > 0.0f ? (1.0f - seq_phase) / seq_dphase : (float)pat, steer ? seq_phase : -1.0f, seq_dphase);
+                for (k = 0; k < NVOICE; k++)         /* (track 8's own sound sleeps under the loop: its voices end) */
+                    if (voice[k].state != V_OFF && voice[k].track == t)
+                        voice[k].state = V_OFF;
             }
             g_t *= 1.0f / 0.64f;                 /* (LEVEL at its 80: the loop as it was played) */
             if (pf_rate * 12.0f < 1.0f)          /* (PERFORM's TAPE STOP: the loop is no tape, it fades as it stops) */
@@ -1558,9 +1568,8 @@ static struct {
     uint8_t sel;                         /* the selected track */
     uint8_t page;
     int8_t octave;                       /* -2 .. +2 */
-    uint8_t oct_chord;                   /* both OCT buttons went down together: neither release shifts */
-    uint8_t undo_ok, undo_trk, undo_sound;   /* UNDO SOUND: the track and the sound to put back */
-    uint32_t undo_t;                     /* the last turn of PRESETS (a pause starts a new undo) */
+    uint8_t turn_trk, turn_from;         /* PRESETS: the track being turned and the sound the turn began at (the screen says both) */
+    uint32_t turn_t;                     /* its last turn */
     int8_t held_step;                    /* the step page: the step whose key is down (-1 none) */
     uint8_t held_turned;                 /* KNOB 1 turned while it was held: letting go does not toggle it */
     uint8_t note_of[NKEYS];              /* the note each held key started (the octave may change under it) */
@@ -1568,9 +1577,8 @@ static struct {
     int8_t hot;                          /* the knob turned last (0..3), lit for a moment */
     uint32_t hot_t;
     uint8_t title;                       /* the title is up (the first TITLE_MS after a start) */
-    uint8_t loop_mode;                   /* the looper's mode: OCT+ and OCT- are the looper's */
-    uint8_t dn_fired;                    /* OCT- held long enough: it cleared (letting go is no undo) */
-    uint32_t dn_t;                       /* OCT- went down in the looper's mode (0: not held) */
+    uint8_t rec_fired;                   /* REC held long enough: it cleared (letting go does nothing more) */
+    uint32_t rec_t;                      /* REC went down (0: not held) */
     uint32_t loop_seen;                  /* takes finished that the screen has said */
     uint32_t loop_drawn;                 /* the looper's state as the screen shows it */
     uint8_t redraw;
@@ -1657,13 +1665,6 @@ static void speak(void)                      /* a screen reader that asks hears 
 /* PRESETS: the selected track's sound, one place along the list; the list stops at its ends. Only the sound changes:
  * the knobs' values, the steps and the other tracks stay. The screen says the old and the new */
 /* ------------------------------------------------------------------ the looper's side of the panel --- */
-static int t8_in_use(void)                   /* track 8 has a sound or steps of its own */
-{
-    uint32_t i, any = trk[NTRK - 1u].sound != 0u;
-    for (i = 0; i < NSTEP; i++)
-        any |= step_on[NTRK - 1u][i];
-    return (int)any;
-}
 static int on_t8l(void) { return ui.sel == NTRK - 1u && lp.own; }   /* track 8 is selected and is the looper */
 static void say_t8l(void) { app_say("SELECT T1-7 TO PLAY", ""); }
 
@@ -1676,35 +1677,29 @@ static void layer_text(char *a, uint32_t n)  /* "LAYER 3" */
     text_cat(a, c);
 }
 
-static void looper_mode(void)                /* OCT- and OCT+ together: into the looper's mode, or out of it */
-{
-    ui.loop_mode = (uint8_t)!ui.loop_mode;
-    ui.dn_t = 0;
-    if (!ui.loop_mode) {
-        app_say("LOOPER MODE", "OFF");       /* (a loop plays on; without one track 8 is a track again: app_frame) */
-    } else if (!lp.own && t8_in_use()) {
-        app_say("TRACK 8 IN USE", "HOLD - TO CLEAR");
-    } else {
-        lp.own = 1;                          /* track 8 is free: it is the looper */
-        app_say("LOOPER MODE", "ON");
-    }
-}
-
-static void looper_add(void)                 /* OCT+: a layer, one pass of the pattern from the next bar */
+/* REC, a short press: a layer starts at the next bar; again while it records: it ends where the bar it is in ends
+ * (a first layer is as long as it ran, in whole bars; one on top ends by itself after once round the loop); again while
+ * it still waits for the bar: it is called off. The loop lives on track 8: while there is one, track 8 is T8L */
+static void looper_rec(void)
 {
     char a[20];
-    if (!lp.own) {
-        app_say("TRACK 8 IN USE", "HOLD - TO CLEAR");
+    if (lp.state == LP_REC) {
+        lp.req = LQ_STOP;
+        app_say("LAYER ENDS", "WITH THIS BAR");
+    } else if (lp.state == LP_ARMED || lp.req == LQ_ARM) {
+        lp.req = LQ_CANCEL;
+        app_say("TAKE", "CANCELLED");
     } else if (!seq_play_req) {
         app_say("Press PLAY first", "");
-    } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
-        app_say("RECORDING", "WAIT");
+    } else if (lp.fading) {
+        app_say("WAIT", "");
     } else {
-        uint32_t div = lp.has ? lp.div : looper_fit(pat_frames() * lp.bars);
+        const uint32_t div = lp.has ? lp.div : looper_fit(pat_frames());
         if (!div) {
             app_say("PATTERN TOO LONG", "TO LOOP");
             return;
         }
+        lp.own = 1;                          /* (track 8 is the looper's from here: the audio interrupt takes the take) */
         lp.req = LQ_ARM;
         if (div == 4u && !lp.has) {          /* said before the take, not found out after */
             app_say("LONG PATTERN:", "LOOP AT 11 KHZ");
@@ -1715,12 +1710,10 @@ static void looper_add(void)                 /* OCT+: a layer, one pass of the p
     }
 }
 
-static void looper_undo(void)                /* OCT- let go: the take under way is dropped, or the newest layer goes */
+static void looper_undo(void)                /* REC held 3 to 5 s: the take under way is dropped, or the newest layer goes */
 {
     char a[20];
-    if (!lp.own) {
-        app_say("TRACK 8 IN USE", "HOLD - TO CLEAR");
-    } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
+    if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
         lp.req = LQ_CANCEL;
         app_say("TAKE", "CANCELLED");
     } else if (lp.undo) {
@@ -1734,18 +1727,9 @@ static void looper_undo(void)                /* OCT- let go: the take under way 
     }
 }
 
-static void looper_clear(void)               /* OCT- held: the whole loop goes; or track 8's own sound and steps */
+static void looper_clear(void)               /* REC held 5 s: the whole loop goes, and track 8 is its own track again */
 {
-    uint32_t i;
-    if (!lp.own) {                           /* track 8 was in use: emptied, and the looper's from now */
-        trk[NTRK - 1u].sound = 0;
-        for (i = 0; i < NSTEP; i++)
-            step_on[NTRK - 1u][i] = 0;
-        if (ui.undo_ok && ui.undo_trk == NTRK - 1u)
-            ui.undo_ok = 0;                  /* (no putting back a sound on the looper's track) */
-        lp.own = 1;
-        app_say("TRACK 8 CLEARED", "LOOPER READY");
-    } else if (lp.has || lp.state != LP_IDLE) {
+    if (lp.has || lp.state != LP_IDLE || lp.req == LQ_ARM) {
         lp.req = LQ_CLEAR;
         app_say("LOOP CLEARED", "");
     } else {
@@ -1766,48 +1750,18 @@ static void sound_turn(int32_t e)
         app_say(e < 0 ? "START OF LIST" : "END OF LIST", "");
         return;
     }
-    if (!(ui.undo_ok && ui.undo_trk == t && now - ui.undo_t < 1500u)) {   /* a new turn: what REC puts back */
-        ui.undo_ok = 1;
-        ui.undo_trk = (uint8_t)t;
-        ui.undo_sound = (uint8_t)old;
+    if (!(ui.turn_trk == t && now - ui.turn_t < 1500u)) {   /* a new turn: the sound it began at */
+        ui.turn_trk = (uint8_t)t;
+        ui.turn_from = (uint8_t)old;
     }
-    ui.undo_t = now;
+    ui.turn_t = now;
     trk[t].sound = (uint8_t)to;
-    list_name(ui.undo_sound, a);             /* (the sound before the turn began: what REC puts back) */
+    list_name(ui.turn_from, a);              /* (the sound before the turn began) */
     list_name((uint32_t)to, b);
     m[0] = 0;
     text_cat(m, "> ");
     text_cat(m, b);
     app_say(a, m);
-}
-
-static void sound_undo(void)                 /* REC: UNDO SOUND */
-{
-    char a[28], b[28], m[28];
-    uint32_t t;
-    if (!ui.undo_ok) {
-        app_say("NOTHING TO UNDO", "");
-        return;
-    }
-    t = ui.undo_trk;
-    list_name(trk[t].sound, a);
-    list_name(ui.undo_sound, b);
-    trk[t].sound = ui.undo_sound;
-    ui.undo_ok = 0;
-    ui.sel = (uint8_t)t;                     /* (the track it was on: shown, so the undo is seen) */
-    ui_sel_isr = ui.sel;
-    m[0] = 0;
-    text_cat(m, "UNDO T");
-    b[27] = 0;
-    {
-        char n[4];
-        int_text((int32_t)t + 1, n);
-        text_cat(m, n);
-        text_cat(m, ": ");
-        text_cat(m, b);
-    }
-    (void)a;
-    app_say(m, "");
 }
 
 static void octave_step(int32_t d)
@@ -2060,7 +2014,10 @@ static void input(void)
             any |= plat_enc((int)k) != 0;
         if (ui.page != PAGE_PLAY)
             any |= (keys & ~ui.keys) != 0u;
-        if (any) {
+        if (any && pressed == 1u << B_REC && ui.page != PAGE_GLO) {
+            city_close();                    /* REC is the looper's and must fall on its bar: it closes the view and counts */
+            ui.idle_t = plat_ms();
+        } else if (any) {
             city_close();
             ui.wake = btn;
             ui.idle_t = plat_ms();
@@ -2192,43 +2149,42 @@ static void input(void)
         }
     }
 
-    /* OCT- and OCT+ act when the button is let go. Both down together is the looper's chord: into its mode or out
-     * of it, and then neither release does anything, whichever finger came first. Out of the mode they move the
-     * keys' octave; in it the octave stays, OCT+ adds a layer, OCT- takes the newest off and, held, clears */
-    if ((btn >> B_OCTDN & 1u) && (btn >> B_OCTUP & 1u) && !ui.oct_chord) {
-        ui.oct_chord = 1;
-        looper_mode();
-    }
-    if (ui.loop_mode) {
-        uint32_t now = plat_ms();
-        if ((pressed >> B_OCTDN & 1u) && !ui.oct_chord) {
-            ui.dn_t = now | 1u;
-            ui.dn_fired = 0;
+    /* OCT- and OCT+ move the keys' octave, when the button is let go */
+    if (released >> B_OCTDN & 1u)
+        octave_step(-1);
+    if (released >> B_OCTUP & 1u)
+        octave_step(1);
+    /* REC is the looper's (but on the GLO page, where it is DISCONNECT). A short press, under REC_SHORT_MS: a layer
+     * starts, or the one recording ends. Held: let go between REC_UNDO_MS and REC_CLEAR_MS, the last layer goes;
+     * at REC_CLEAR_MS the whole loop goes, there and then. Let go between a short press and REC_UNDO_MS: nothing */
+    if (ui.page != PAGE_GLO) {
+        const uint32_t now = plat_ms();
+        if (pressed >> B_REC & 1u) {
+            ui.rec_t = now ? now : 1u;
+            ui.rec_fired = 0;
         }
-        if (ui.dn_t && (btn >> B_OCTDN & 1u) && !ui.oct_chord && !ui.dn_fired && now - ui.dn_t >= LOOP_HOLD_MS) {
-            ui.dn_fired = 1;
+        if (ui.rec_t && (btn >> B_REC & 1u) && !ui.rec_fired && (int32_t)(now - ui.rec_t) >= (int32_t)REC_CLEAR_MS) {
+            ui.rec_fired = 1;
             looper_clear();
         }
-        if (released >> B_OCTDN & 1u) {
-            if (ui.dn_t && !ui.oct_chord && !ui.dn_fired)
-                looper_undo();
-            ui.dn_t = 0;
+        if (released >> B_REC & 1u) {
+            if (ui.rec_t && !ui.rec_fired) {
+                const int32_t held = (int32_t)(now - ui.rec_t);
+                if (held < (int32_t)REC_SHORT_MS)
+                    looper_rec();
+                else if (held >= (int32_t)REC_UNDO_MS)
+                    looper_undo();
+                else
+                    app_say("REC: HOLD 3 S UNDO,", "5 S CLEAR");
+            }
+            ui.rec_t = 0;
             ui.redraw = 1;
         }
-        if ((released >> B_OCTUP & 1u) && !ui.oct_chord)
-            looper_add();
-        if (ui.oct_chord)
-            ui.dn_t = 0;
-        if (ui.dn_t)
+        if (ui.rec_t && (int32_t)(now - ui.rec_t) >= (int32_t)REC_SHORT_MS)
             ui.redraw = 1;                   /* (the hold's bar grows) */
     } else {
-        if ((released >> B_OCTDN & 1u) && !ui.oct_chord)
-            octave_step(-1);
-        if ((released >> B_OCTUP & 1u) && !ui.oct_chord)
-            octave_step(1);
+        ui.rec_t = 0;
     }
-    if (ui.oct_chord && !(btn >> B_OCTDN & 1u) && !(btn >> B_OCTUP & 1u))
-        ui.oct_chord = 0;
 
     for (k = 0; k < NB; k++) {
         static const char *const BTN_NAME[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
@@ -2246,7 +2202,7 @@ static void input(void)
                 app_say("BLUETOOTH:", "DISCONNECTED");
             }
         } else if (k == B_REC) {
-            sound_undo();
+            /* (the looper's: above) */
         } else if (k == B_PLAY) {
             seq_play_req = (uint8_t)!seq_play_req;
             if (!seq_play_req && (lp.state != LP_IDLE || lp.req == LQ_ARM))
@@ -2347,20 +2303,28 @@ static void input(void)
             ui.idle_t = plat_ms();
             knob_turn(k, e);
         }
-    plat_enc(EN_SELECT);                     /* (no job in this version: its turns are not kept) */
+    if ((e = plat_enc(EN_SELECT)) != 0) {    /* SELECT: the tempo, a beat a minute a click, on every page (EDIT 2's KNOB 4 is the same) */
+        char n[8];
+        ui.idle_t = plat_ms();
+        if (ck_follow) {                     /* a clock in sets it: who leads is said instead */
+            app_say("TEMPO:", ck_src == PORT_BLE ? "THE BT CLOCK LEADS" : "BURGER LEADS");
+        } else {
+            const int32_t bpm = clamp((int32_t)(44100.0f * 15.0f / seq_sf + 0.5f) + e, 40, 240);
+            seq_sf = 44100.0f * 60.0f / ((float)bpm * 4.0f);
+            int_text(bpm, n);
+            app_say("TEMPO", n);
+        }
+    }
 
     if (keys != ui.keys || btn != ui.btn)
         ui.redraw = 1;
     ui.keys = keys;
     ui.btn = btn;
 
-    /* the lights: REC only while there is a sound to undo; SEQ on the step page; PLAY while playing */
+    /* the lights: REC through a take (blinking while it waits for the bar); SEQ on the step page; PLAY while playing */
     ui_step_isr = ui.page == PAGE_STEP;
-    lit_btn = (ui.undo_ok ? 1u << B_REC : 0u) | (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
-              /* the looper's mode: OCT+ lit through a take (blinking while it waits for the bar), OCT- while a layer
-               * can be taken off */
-              (ui.loop_mode && (lp.state == LP_REC || (lp.state == LP_ARMED && (plat_ms() >> 7 & 1u))) ? 1u << B_OCTUP : 0u) |
-              (ui.loop_mode && lp.undo ? 1u << B_OCTDN : 0u) |
+    lit_btn = (lp.state == LP_REC || ((lp.state == LP_ARMED || lp.req == LQ_ARM) && (plat_ms() >> 7 & 1u)) ? 1u << B_REC : 0u) |
+              (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
               (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT || ui.page == PAGE_EDIT2 ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (ui.page == PAGE_GLO ? 1u << B_GLO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
         for (k = 0; k < seq_len; k++)
@@ -2452,43 +2416,40 @@ static void draw_header(void)
         cv_rect(0, 0, 76, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "PERFORM", C_BLACK);
         cv_text(82, 2, &FONT_XS, pf_latch ? "LATCH: A KEY ON, AGAIN OFF" : "HOLD A WHITE KEY", C_HI);
-    } else if (ui.loop_mode) {
-        /* the looper's mode, plain to see: its name on a block, then where it stands */
+    } else if (REC_UP) {
+        /* REC is held, or a take waits or runs: said on a block, then where it stands */
+        const int32_t held = ui.rec_t && !ui.rec_fired ? (int32_t)(now - ui.rec_t) : 0;
         const char *w;
         char c[8];
         t[0] = 0;
-        cv_rect(0, 0, 60, 16, C_ORANGE);
-        cv_text(5, 0, &FONT_B, "LOOPER", C_BLACK);
-        if (ui.dn_t && !ui.dn_fired && now - (ui.dn_t & ~1u) > 150u) {
-            w = "HOLD TO CLEAR";
-        } else if (!lp.own) {
-            w = "TRACK 8 IN USE: HOLD - TO CLEAR";
+        cv_rect(0, 0, 36, 16, C_ORANGE);
+        cv_text(5, 0, &FONT_B, "REC", C_BLACK);
+        if (held >= (int32_t)REC_UNDO_MS) {
+            w = lp.state != LP_IDLE ? "LET GO: CANCEL THE TAKE   HOLD: CLEAR" : "LET GO: UNDO LAYER   HOLD ON: CLEAR";
+        } else if (held >= (int32_t)REC_SHORT_MS) {
+            w = "HOLD 3 S: UNDO LAYER   5 S: CLEAR LOOP";
         } else if (lp.state == LP_REC) {
             text_cat(t, "RECORDING LAYER ");
             int_text(lp.layers + 1, c);
             text_cat(t, c);
-            w = t;
-        } else if (lp.state == LP_ARMED) {
-            w = "WAITS FOR THE BAR";
-        } else if (lp.has && lp.drift) {
-            w = "LOOP OUT OF TIME";
-        } else if (lp.has) {
-            int_text(lp.layers, c);
-            text_cat(t, c);
-            text_cat(t, lp.layers == 1u ? " LAYER" : " LAYERS");
-            text_cat(t, lp.undo ? "  UNDO 1" : "");
+            if (lp.first) {
+                text_cat(t, "  BAR ");
+                int_text(lp.barsrec + 1, c);
+                text_cat(t, c);
+            }
             w = t;
         } else {
-            w = seq_play_req ? "EMPTY: OCT+ RECORDS" : "EMPTY: PLAY, THEN OCT+";
+            w = "WAITS FOR THE BAR";
         }
-        cv_text(66, 2, &FONT_XS, w, lp.state == LP_REC ? C_WHITE : C_HI);
-        if (ui.dn_t && !ui.dn_fired && now - (ui.dn_t & ~1u) > 150u) {     /* the hold's bar, full when it clears */
-            uint32_t held = now - (ui.dn_t & ~1u);
-            cv_rect(66, 20, 168, 5, C_LINE);
-            cv_rect(66, 20, (int32_t)(held >= LOOP_HOLD_MS ? 168u : held * 168u / LOOP_HOLD_MS), 5, C_WHITE);
-        } else if (lp.state == LP_REC && lp.total) {                       /* a take: how far through the pattern */
-            cv_rect(66, 20, 168, 3, C_LINE);
-            cv_rect(66, 20, (int32_t)((uint64_t)lp.frame * 168u / lp.total), 3, C_ORANGE);
+        cv_text(42, 2, &FONT_XS, w, lp.state == LP_REC && held < (int32_t)REC_SHORT_MS ? C_WHITE : C_HI);
+        if (held >= (int32_t)REC_SHORT_MS) {             /* the hold's bar: a mark at 3 s, full at 5 s */
+            cv_rect(42, 20, 192, 5, C_LINE);
+            cv_rect(42, 20, (int32_t)((uint32_t)held >= REC_CLEAR_MS ? 192u : (uint32_t)held * 192u / REC_CLEAR_MS), 5,
+                    held >= (int32_t)REC_UNDO_MS ? C_ORANGE : C_WHITE);
+            cv_rect(42 + (int32_t)(REC_UNDO_MS * 192u / REC_CLEAR_MS), 18, 1, 9, C_WHITE);
+        } else if (lp.state == LP_REC && !lp.first && lp.total) {          /* a layer on top: how far round the loop */
+            cv_rect(42, 20, 192, 3, C_LINE);
+            cv_rect(42, 20, (int32_t)((uint64_t)(lp.tk < lp.total ? lp.tk : lp.total) * 192u / lp.total), 3, C_ORANGE);
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
@@ -2504,7 +2465,7 @@ static void draw_header(void)
     }
     {
         int32_t x = cv_text(6, 15, &FONT_T, APP_VERSION, C_GRAY);
-        if (!(ui.loop_mode && now >= ui.msg_until && ((ui.dn_t && !ui.dn_fired) || lp.state == LP_REC)))
+        if (!(REC_UP && now >= ui.msg_until && !ui.perform))
         {
             x = cv_text(x + 8, 15, &FONT_T, !ck_follow ? "CLOCK: FM-1" : ck_src == PORT_BLE ? "CLOCK: BT" : "CLOCK: BURGER",
                         ck_follow ? C_HI : C_GRAY);
@@ -2512,7 +2473,7 @@ static void draw_header(void)
                 cv_text(x + 6, 15, &FONT_T, "BT", C_WHITE);
         }
     }
-    if (stack_mute && !(ui.loop_mode && now >= ui.msg_until && ((ui.dn_t && !ui.dn_fired) || lp.state == LP_REC))) {
+    if (stack_mute && !(REC_UP && now >= ui.msg_until && !ui.perform)) {
         /* the app plays the FM-1's sound: said on the second line, on every page (a looper's bar there goes first) */
         int32_t w = text_w(&FONT_XS, "SOUND IN BURGER");
         cv_rect(240 - w - 10, 15, w + 10, 12, C_ORANGE);
@@ -2730,10 +2691,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             cv_rect(p - 1, 32, 3, 7, t->filt >= -FILT_DEAD && t->filt <= FILT_DEAD ? C_GRAY : C_ORANGE);
         }
     }
-    if (ui.loop_mode)                        /* the looper's mode: what its two buttons do */
-        cv_text(4, 40, &FONT_T, "OCT+: ADD LAYER  OCT-: UNDO LAYER", C_WHITE);
-    else
-        cv_text(4, 40, &FONT_T, ui.undo_ok ? "REC: UNDO SOUND" : "ALGO: TRACK  PRESETS: SOUND", ui.undo_ok ? C_WHITE : C_DIM);
+    cv_text(4, 40, &FONT_T, lp.own ? "REC: LAYER  HELD 3 S: UNDO  5 S: CLEAR" : "ALGO: TRACK  PRESETS: SOUND", C_DIM);
     {                                        /* where the track's sound is in the list: its category and place there */
         char c[20];
         cat_text(t->sound, c);
@@ -3129,9 +3087,8 @@ void app_ui_init(void)
 {
     my_t0 = plat_ms();
     ui.title = 1;
-    ui.loop_mode = 0;
-    ui.dn_t = 0;
-    ui.oct_chord = 0;
+    ui.rec_t = 0;
+    ui.rec_fired = 0;
     touch_on(1);                             /* velocity: the keys' readings on */
     plat_usb_audio_full(1);                  /* USB audio at full level, whatever MASTER says */
     lcd_fill(0, 0, 240, 240, C_BLACK);
@@ -3232,19 +3189,32 @@ void app_frame(void)
         ui.hot = -1;
         ui.redraw = 1;
     }
-    if (ui.undo_ok && now - ui.undo_t >= 1500u && now - ui.undo_t < 1600u)
-        ui.redraw = 1;
-    if (!ui.loop_mode)                       /* out of the mode track 8 is the looper's only while a loop is there */
-        lp.own = (uint8_t)(lp.has || lp.state != LP_IDLE || lp.fading);
+    /* track 8 is the looper's while a loop is there, or a take waits or runs; else it is its own track again */
+    lp.own = (uint8_t)(lp.has || lp.state != LP_IDLE || lp.fading || lp.req == LQ_ARM);
+    if (lp.low) {                            /* a first layer went on past what 22 kHz holds */
+        lp.low = 0;
+        app_say("LONG LOOP:", "NOW AT 11 KHZ");
+    }
     if (lp.done != ui.loop_seen) {           /* a take is in */
         char a[20];
         ui.loop_seen = lp.done;
-        layer_text(a, lp.layers);
-        app_say(a, "IN THE LOOP");
+        if (lp.full) {                       /* a first layer that ended by itself */
+            char n[8];
+            lp.full = 0;
+            a[0] = 0;
+            int_text(lp.bars, n);
+            text_cat(a, n);
+            text_cat(a, lp.bars == 1u ? " BAR" : " BARS");
+            app_say("LOOP FULL:", a);
+        } else {
+            layer_text(a, lp.layers);
+            app_say(a, "IN THE LOOP");
+        }
     }
     {   /* the looper's state changed, or a take moves on: the screen follows */
         uint32_t st = lp.own | lp.has << 1 | lp.state << 2 | lp.undo << 4 | (uint32_t)lp.layers << 5 |
-                      (lp.state == LP_REC && lp.total ? (lp.frame * 32u / lp.total) << 13 : 0u) |
+                      (lp.state == LP_REC && lp.total ? ((lp.tk < lp.total ? lp.tk : lp.total) * 32u / lp.total) << 13 : 0u) |
+                      (lp.state == LP_REC && lp.first ? (uint32_t)lp.barsrec << 21 : 0u) |
                       (lp.state == LP_ARMED ? (now >> 7 & 1u) << 20 : 0u);
         if (st != ui.loop_drawn) {
             ui.loop_drawn = st;
@@ -3263,8 +3233,8 @@ void app_frame(void)
     /* the city view: by itself while the pattern plays on the tracks' page and nothing has been touched for a while
      * (never over another page, nor in the looper's mode, where the next press must count: its first touch only
      * closes it); it goes when the pattern stops, unless HOME opened it */
-    if (!city.stage && seq_play_req && ui.page == PAGE_PLAY && !ui.title && !ui.loop_mode && lp.state == LP_IDLE &&
-        lp.req != LQ_ARM && !ui.sv_t && now - ui.idle_t >= CITY_IDLE_MS)
+    if (!city.stage && seq_play_req && ui.page == PAGE_PLAY && !ui.title && lp.state == LP_IDLE &&
+        lp.req != LQ_ARM && !ui.sv_t && !ui.rec_t && now - ui.idle_t >= CITY_IDLE_MS)
         city_open(0);
     if (city.stage && !city.manual && !seq_play_req)
         city_close();
@@ -3289,8 +3259,6 @@ int app_expect(const char *what, int *got)
         *got = (int)NLIST;
     else if (!strcmp(what, "octave"))
         *got = ui.octave;
-    else if (!strcmp(what, "undo"))
-        *got = ui.undo_ok;
     else if (!strcmp(what, "pitch"))
         *got = trk[ui.sel].pitch;
     else if (!strcmp(what, "filt"))
@@ -3375,9 +3343,7 @@ int app_expect(const char *what, int *got)
         *got = rx.on;
     else if (!strncmp(what, "trk", 3) && what[3] >= '1' && what[3] <= '8')  /* trkN: track N's place in the list */
         *got = trk[what[3] - '1'].sound;
-    else if (!strcmp(what, "loop_mode"))     /* the looper: its mode, track 8 its own, a loop there, its layers, */
-        *got = ui.loop_mode;
-    else if (!strcmp(what, "loop_own"))
+    else if (!strcmp(what, "loop_own"))      /* the looper: track 8 is its, a loop there, its layers, */
         *got = lp.own;
     else if (!strcmp(what, "loop_has"))
         *got = lp.has;
@@ -3389,10 +3355,8 @@ int app_expect(const char *what, int *got)
         *got = lp.state;
     else if (!strcmp(what, "loop_khz"))      /* and its rate: 22 or 11 */
         *got = lp.div == 4u ? 11 : 22;
-    else if (!strncmp(what, "loop_bars", 9)) {   /* a test: the loop spans this many passes of the pattern (1 as built) */
-        lp.bars = (uint8_t)(what[9] >= '1' && what[9] <= '4' ? what[9] - '0' : 1);
+    else if (!strcmp(what, "loop_bars"))     /* the bars it is long */
         *got = lp.bars;
-    }
     else if (!strcmp(what, "env_a"))         /* the selected track's ATTACK, RELEASE (-1 AUTO), SUSTAIN, VELOCITY */
         *got = trk[ui.sel].env_a;
     else if (!strcmp(what, "env_r"))

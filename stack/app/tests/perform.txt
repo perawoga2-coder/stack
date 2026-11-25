@@ -629,13 +629,6 @@ release SAVE
 wait 100
 expect pf_latch 0
 # --- the looper: a loop of two layers, so an undo sleeps in its second block
-press OCT-
-press OCT+
-wait 60
-release OCT+
-release OCT-
-wait 60
-expect loop_mode 1
 turn ALGO -8
 wait 40
 turn ALGO 5
@@ -643,14 +636,15 @@ wait 40
 expect track 6
 tap PLAY
 wait 100
-tap OCT+
+tap REC
 wait 2300
 key w4 down 100
 wait 300
 key w4 up
+tap REC
 wait 2000
 expect loop_layers 1
-tap OCT+
+tap REC
 wait 2300
 key w8 down 100
 wait 300
@@ -659,7 +653,7 @@ wait 2000
 expect loop_layers 2
 expect loop_undo 1
 # a take: the buffer's keys and the two speed keys wait (dim on the overlay), the others work
-tap OCT+
+tap REC
 wait 60
 press SEL
 wait 40
@@ -695,8 +689,10 @@ key w1 up
 wait 40
 release SEL
 wait 400
-# OCT-: nothing to undo now; the loop plays on
-tap OCT-
+# REC held 3 s: nothing to undo now; the loop plays on
+press REC
+wait 3500
+release REC
 wait 100
 expect loop_layers 3
 expect loop_has 1
@@ -706,7 +702,7 @@ wait 40
 key w1 down 100
 wait 500
 expect pf_buf 2
-tap OCT+
+tap REC
 wait 100
 expect pf_ph -1
 expect pf_lit 0
@@ -717,18 +713,11 @@ expect pf_buf 0
 key w1 up
 release SEL
 wait 200
-press OCT-
-wait 900
-release OCT-
+press REC
+wait 5200
+release REC
 wait 200
 expect loop_has 0
-press OCT-
-press OCT+
-wait 60
-release OCT+
-release OCT-
-wait 60
-expect loop_mode 0
 tap PLAY
 wait 300
 expect lim_clips 0

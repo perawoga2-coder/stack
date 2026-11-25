@@ -109,11 +109,14 @@ expect mute 1
 power
 wait 600
 expect mute 0
-# the looper and the rest are as they were: the mode still turns on
-press OCT-
-press OCT+
+# the looper and the rest are as they were: REC still starts a take
+tap PLAY
 wait 60
-release OCT+
-release OCT-
+tap REC
 wait 60
-expect loop_mode 1
+expect loop_state >0
+tap REC
+wait 60
+expect loop_state 0
+tap PLAY
+wait 100

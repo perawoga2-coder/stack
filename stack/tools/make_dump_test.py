@@ -118,8 +118,7 @@ many("expect store_writes 0",
      "sysex_out", "sysex " + frame(31, []), "wait 4", "expect_sysex " + frame(31, [0, 0, 0, 0, 0, 0, 0, 0] + pack7([0, 0, 0, 0])),
      "sysex_out", "sysex " + frame(32, [0, 0]), "wait 4", "expect_sysex " + frame(32, [0, 0, 0, 0]),
      "# a loop on track 8: 3/4 at 100 is 1.8 s, 39 690 samples at 22 kHz; the organ held across it",
-     "press OCT-", "press OCT+", "wait 60", "release OCT+", "release OCT-", "wait 60", "expect loop_mode 1",
-     "tap PLAY", "wait 100", "tap OCT+", "wait 1900", "key w4 down 100", "wait 900", "key w4 up", "wait 1900",
+     "tap PLAY", "wait 100", "tap REC", "wait 1900", "key w4 down 100", "wait 500", "tap REC", "wait 320", "key w4 up", "wait 1900",
      "expect loop_layers 1", "expect loop_total 79380", "expect loop_ver 1",
      "# the song says so: track 8 is the LOOP, one layer (and it plays)")
 T[7] = track(kind="LOOP")
@@ -137,7 +136,7 @@ many("wavstop", f"expect dump_pieces {pieces}", "expect dump_loop_ok 1", "expect
      "expect peak_db_min -40", "expect lim_clips 0", "expect store_writes 0", "expect loop_layers 1",
      "# (the last piece is the short one: 12 bytes)",
      "# a second layer: the loop is another, and its number says so",
-     "tap OCT+", "wait 1900", "key w8 down 100", "wait 600", "key w8 up", "wait 2200", "expect loop_layers 2",
+     "tap REC", "wait 1900", "key w8 down 100", "wait 600", "key w8 up", "wait 2200", "expect loop_layers 2",
      "expect loop_ver 2", "sysex " + frame(32, [0, 0]), "wait 4", "sysex " + frame(32, [1, 0]), "wait 4",
      "expect dump_pieces 2", "expect dump_loop_ok 0",
      "# --- the computer stops reading: the answers that do not fit wait their turn, and STACK does not (the pattern",
