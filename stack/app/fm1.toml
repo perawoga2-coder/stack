@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # STACK's build settings (base/tools/build.py)
 name = "stack"                 # the build's files: stack.fwsc, stack-X.Y.Z.fwsc, stack_host
-id_prefix = "FM-1_58"          # package identity. TEMPORARY for the test builds: to be confirmed against the hubs' lists
+id_prefix = "FM-1_34"          # package identity: FM-1_34XXYYZZ (since 4.01-beta; FM-1_58 was taken: checked against 1712 known FM-1 identities)
 usb_manufacturer = "Maker Hip"
 usb_product = "STACK FM-1"
 o2 = []
