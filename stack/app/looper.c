@@ -240,7 +240,7 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
                     len = 0;
                 } else {                         /* a layer on top: the loop as it is, and the playing added for a turn at most */
                     lp.first = 0;
-                    memcpy(loop_m[lp.cur ^ 1u], loop_m[lp.cur], (size_t)len * sizeof(int16_t));
+                    memcpy(loop_m[lp.cur ^ 1u], loop_m[lp.cur], (uint32_t)len * 2u);
                     lp.end_in = (float)lp.total;
                 }
             }
