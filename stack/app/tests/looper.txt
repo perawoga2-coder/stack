@@ -1,4 +1,4 @@
-# STACK in the host simulator: the looper on REC (4.02: no looper mode), and SELECT as the tempo.
+# STACK in the host simulator: the looper on REC (4.03: a take starts the moment REC goes down), and SELECT as the tempo.
 #   app/build/host/stack_host app/tests/looper.txt app/build/host
 master 4096
 wait 2200
@@ -42,29 +42,31 @@ turn ALGO -3
 wait 60
 expect track 5
 expect sound 33
-# --- REC, a short press, while it plays: a layer waits for the next bar (REC blinks), then records (REC lit)
+# --- REC goes down while it plays (700 ms into a bar): it records from that moment, REC lit, the screen says so
 wav looper_three_layers.wav
 tap PLAY
-wait 300
-tap REC
-wait 60
-expect loop_state 1
-expect loop_own 1
-shot looper_waits.png
-leds
-wait 1700
+wait 700
+press REC
+wait 30
 expect loop_state 2
+expect loop_own 1
 shot looper_recording.png
 leds
+release REC
+wait 30
+expect loop_state 2
 key 7 down 100
 wait 300
 key 7 up
-wait 200
-# REC again: it ends where this bar ends, not before; then the loop plays on, one bar long, at 22 kHz
+wait 900
+# REC again after 1.3 s: the nearest whole number of bars is one (2 s): it records on to there (REC blinks), then plays
 tap REC
 wait 60
 expect loop_state 2
-wait 1500
+shot looper_recording_on.png
+wait 500
+expect loop_state 2
+wait 200
 expect loop_state 0
 expect loop_layers 1
 expect loop_has 1
@@ -97,51 +99,56 @@ expect page 0
 turn ALGO -3
 wait 60
 expect track 5
-# --- a layer on top: REC; it starts at the next bar and ends by itself after once round the loop
-tap REC
-wait 60
+# --- a layer on top: from the moment REC goes down (it waits in the queue while REC is down: state 1; taken when it
+# is let go: 2); it ends by itself after once round the loop
+press REC
+wait 30
 expect loop_state 1
-wait 2000
+shot looper_layer_two.png
+release REC
+wait 30
 expect loop_state 2
+expect loop_undo 0
 key 9 down 100
 wait 300
 key 9 up
-wait 1800
+wait 1500
+expect loop_state 2
+wait 200
 expect loop_state 0
 expect loop_layers 2
 expect loop_undo 1
-# a third, ended by REC before its bar is out (the loop is one bar: it ends with it)
+# a third, ended by REC before it is once round: it is in at once (the rest of the loop is as it was)
+wait 500
 tap REC
-wait 2100
-expect loop_state 2
+wait 100
 key 12 down 100
 wait 200
 key 12 up
+wait 100
 tap REC
-wait 2000
+wait 150
 expect loop_state 0
 expect loop_layers 3
 shot looper_three_layers.png
-wait 2200
+wait 4200
 wavstop
 expect lim_clips 0
-# REC while a take still waits for its bar: called off
-tap REC
-wait 60
-expect loop_state 1
-tap REC
-wait 60
-expect loop_state 0
-expect loop_layers 3
-# --- REC held. Let go between half a second and 3 s: nothing
+# --- REC held. Let go between half a second and 3 s: nothing. What the press began is dropped at half a second,
+# and nothing of it was written: the undo is still there
 wav looper_undo.wav
 press REC
-wait 1500
+wait 300
+expect loop_state 1
+wait 300
+expect loop_state 0
+wait 900
 shot looper_hold_early.png
 release REC
 wait 60
 expect loop_layers 3
 expect loop_state 0
+expect loop_undo 1
 # let go between 3 and 5 s: the last layer goes
 press REC
 wait 3500
@@ -160,11 +167,14 @@ expect loop_layers 2
 shot looper_only_one_undo.png
 wait 1500
 wavstop
-# held through a take, let go between 3 and 5 s: that take is dropped, the loop is as it was
+# the press that ends a take, held on and let go between 3 and 5 s: the layer just made goes again
 tap REC
-wait 2100
+wait 500
 expect loop_state 2
 press REC
+wait 200
+expect loop_state 0
+expect loop_layers 3
 wait 3300
 release REC
 wait 200
@@ -195,37 +205,111 @@ key 7 up
 wait 500
 turn ALGO -3
 wait 60
-# --- a first layer left running: it is as long as it runs, in whole bars. At 120 the second bar needs 11 kHz, and
-# two bars are all the memory holds: it ends by itself there, and says so
-tap REC
-wait 2100
+# a first layer whose REC is held on a second: it records all the same (a hold means nothing there before 3 s)
+press REC
+wait 300
 expect loop_state 2
+expect loop_own 1
+wait 700
+expect loop_state 2
+release REC
+wait 100
+expect loop_state 2
+# held from its start for 3 s and let go: dropped; track 8 stays its own
+tap PLAY
+wait 200
+expect loop_state 0
+tap PLAY
+wait 300
+press REC
+wait 3300
+expect loop_state 2
+release REC
+wait 100
+expect loop_state 0
+expect loop_own 0
+expect loop_has 0
+# --- rounding down: REC again after 2.6 s: one bar is nearest; it is cut there and plays at once
+tap REC
+wait 500
+key 7 down 100
+wait 300
+key 7 up
+wait 1760
+tap REC
+wait 60
+expect loop_state 0
+expect loop_bars 1
+expect loop_total 88200
+peakreset
+wait 2000
+expect peak_db_min -40
+press REC
+wait 5200
+release REC
+wait 200
+expect loop_has 0
+# --- rounding up to two bars: REC again after 3.2 s; it records on to 4 s. The memory holds 8 s at 22 kHz
+tap REC
+wait 2200
+key 9 down 100
+wait 300
+key 9 up
+wait 660
+tap REC
+wait 600
+expect loop_state 2
+wait 300
+expect loop_state 0
+expect loop_bars 2
+expect loop_total 176400
 expect loop_khz 22
+expect loop_layers 1
+# a layer on top of two bars, left alone: once round (4 s)
+tap REC
+wait 3800
+expect loop_state 2
+wait 300
+expect loop_state 0
+expect loop_layers 2
+press REC
+wait 5200
+release REC
+wait 200
+expect loop_has 0
+# --- a first layer left running: at 120 four bars (8 s) are all the memory holds: it ends by itself there, and says so
+tap REC
+wait 100
 key 7 down 100
 wait 2300
 key 7 up
+wait 3000
 expect loop_state 2
-expect loop_khz 11
-shot looper_11khz.png
-wait 1900
+shot looper_time_left.png
+wait 2500
+expect loop_state 2
+wait 200
 expect loop_state 0
 expect loop_layers 1
-expect loop_bars 2
-expect loop_total 176400
-expect loop_khz 11
+expect loop_bars 4
+expect loop_total 352800
+expect loop_khz 22
 shot looper_full.png
 peakreset
 wait 2000
 expect peak_db_min -40
-# a layer on top of a loop of two bars: it starts at the next bar (the loop's second), goes once round, and is in
+# a layer on top of four bars, ended early: in at once
 tap REC
-wait 2100
-expect loop_state 2
-wait 1700
-expect loop_state 2
-wait 2300
+wait 700
+key 12 down 100
+wait 300
+key 12 up
+tap REC
+wait 200
 expect loop_state 0
 expect loop_layers 2
+wait 8000
+expect lim_clips 0
 press REC
 wait 5200
 release REC
@@ -257,17 +341,19 @@ wait 60
 expect clk_bpm10 2400
 tap EDIT
 wait 40
-# --- at 240 a bar is a second: two bars at 22 kHz. A loop of two bars, ended by REC in its second bar
+# --- at 240 a bar is a second. REC 300 ms into a bar, again after 1.8 s: two bars
 tap PLAY
-wait 200
+wait 1300
 tap REC
-wait 1100
-expect loop_state 2
+wait 100
 key 7 down 100
 wait 1200
 key 7 up
+wait 360
 tap REC
-wait 900
+wait 60
+expect loop_state 2
+wait 340
 expect loop_state 0
 expect loop_bars 2
 expect loop_total 88200
@@ -275,13 +361,14 @@ expect loop_khz 22
 # it holds to its bars round after round (this tempo is not the one a bar is a whole number of frames at: steered)
 wait 6000
 expect loop_drift 0
-# a layer on top started in the loop's first bar begins at its second
+# a layer on top, once round
 tap REC
-wait 1100
+wait 1900
 expect loop_state 2
-wait 2100
+wait 200
 expect loop_state 0
 expect loop_layers 2
+wait 3000
 expect loop_drift 0
 # the tempo changed under a loop: it does not stretch, and the screen says so
 turn SELECT -40
@@ -293,58 +380,50 @@ wait 5200
 release REC
 wait 200
 expect loop_has 0
-# --- a pattern too long for the memory (40: a bar of 6 s): refused, and said; at 100 (2.4 s) it is 11 kHz from its start
+# --- at 40 a bar is 6 s: one bar is all that fits (REC again after 2 s: it records on to 6 s)
 turn SELECT -200
 wait 80
 expect clk_bpm10 400
 tap REC
-wait 100
-expect loop_state 0
-expect loop_own 0
-shot looper_too_long.png
-turn SELECT 60
-wait 80
-expect clk_bpm10 1000
+wait 2000
 tap REC
-wait 100
-expect loop_state 1
-wait 2500
+wait 3800
 expect loop_state 2
-expect loop_khz 11
-wait 2500
+wait 400
 expect loop_state 0
 expect loop_bars 1
+expect loop_total 264600
 expect loop_layers 1
 press REC
 wait 5200
 release REC
 wait 200
-turn SELECT 20
+expect loop_has 0
+turn SELECT 80
 wait 80
 expect clk_bpm10 1200
-# --- no seams: a note held right across a take's end and the loop's point (the organ)
+# --- no seams: a note held right across a take's two ends and the loop's point (the organ)
 turn PRESET 4
 wait 60
 expect sound 37
 wav looper_seam.wav
-tap REC
-wait 60
-wait 1500
-wait 400
 key 7 down 100
 wait 600
+tap REC
+wait 1700
 tap REC
 wait 2300
 key 7 up
 wait 300
 expect loop_layers 1
+expect loop_bars 1
 wait 6000
 wavstop
 turn PRESET -4
 wait 60
 # --- the pattern stopped under a take: the take is dropped; the loop waits and starts again with the pattern
 tap REC
-wait 2100
+wait 300
 expect loop_state 2
 tap PLAY
 wait 200
@@ -360,6 +439,7 @@ press REC
 wait 5200
 release REC
 wait 200
+expect loop_has 0
 # --- on the step page a take records the steps of the track on it (the kick), not the other tracks' steps
 tap PLAY
 wait 200
@@ -378,10 +458,10 @@ wait 40
 tap PLAY
 wait 200
 tap REC
-wait 2100
+wait 1500
 expect loop_state 2
 tap REC
-wait 2100
+wait 700
 expect loop_layers 1
 tap SEQ
 wait 40

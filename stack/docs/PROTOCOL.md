@@ -255,11 +255,15 @@ The 25 settings, in order (signed ones are two's complement):
     answer:  F0 7D 46 4C 1F <has> <rate> <n lo> <n mid> <n hi> <layers> <ver lo> <ver hi> <CRC, 4 bytes packed> F7
 
 - `<has>`: 1 a loop plays on track 8, 0 none (the rest is then 0).
-- `<rate>`: 0 the loop is at 22 050 Hz, 1 at 11 025 Hz. Mono.
+- `<rate>`: 0 the loop is at 22 050 Hz, 1 at 11 025 Hz. Mono. (Since 4.03-beta it is always 0.)
 - `<n>`: its samples (21 bits). Its length in seconds is n / rate. Up to 4.01-beta it is one pattern long at the
-  tempo it was recorded at. **Since 4.02-beta it is a whole number of bars (patterns) long**, one or more, up to
-  4 s: the number of bars is not sent; it is n / rate divided by the pattern's length at the song's tempo and time
-  signature, rounded. An app that fits the loop to one bar must fit it to that many.
+  tempo it was recorded at. **Since 4.02-beta it is a whole number of bars (patterns) long**, one or more: the
+  number of bars is not sent; it is n / rate divided by the pattern's length at the song's tempo and time
+  signature, rounded. An app that fits the loop to one bar must fit it to that many. Since 4.03-beta a loop can be
+  8 s long (176 400 samples: 352 800 data bytes, 2 757 pieces), four times what 4.02 could send.
+- Since 4.03-beta a loop on the FM-1 starts where REC was pressed, not on a bar line. **The dump does not show
+  that: its first sample is the loop at the start of a bar**, so an app lays it on its own bars as before.
+  The FM-1 keeps the loop as 4-bit ADPCM (with the coder's noise); the dump is that, decoded to 16 bits.
 - `<ver>`: a number (14 bits) that changes whenever the loop that plays is another one: a layer added, an undo, a
   clear.
 - CRC: CRC-32 of the loop's 2 × n data bytes.

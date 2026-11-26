@@ -6,8 +6,9 @@
 /* STACK. Eight tracks, each with one sound picked from a single list; the keys play the selected track.
  *   ALGORITHM  the track, 1..8 (it stops at the ends)
  *   PRESETS    the selected track's sound, from one list that stops at its ends; nothing else changes
- *   REC        the looper (looper.c): a short press starts a layer at the next bar, or ends the one recording with its bar;
- *              held and let go after 3 s: the last layer undone; held 5 s: the loop cleared. (On GLO: disconnect.)
+ *   REC        the looper (looper.c): a layer is recorded from the moment it goes down; again: it ends (a first layer
+ *              at the nearest whole number of bars). Held and let go after 3 s: the last layer undone; held 5 s: the
+ *              loop cleared. (On GLO: disconnect.)
  *   SELECT     the tempo, 1 BPM a detent, 40..240, on every page (the same value as EDIT page 2's K4)
  *   KNOB 1..4  the selected track's PITCH, FILTER (left low-pass, the middle off, right high-pass), DECAY, LEVEL
  *   OCT- OCT+  the keys' octave, on release
@@ -168,7 +169,8 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and th
 #define REC_UNDO_MS 3000u                /* REC let go after this: the last layer goes */
 #define REC_CLEAR_MS 5000u               /* REC held this long: the whole loop goes */
 /* the header says what REC is doing: it is held past a short press, or a take waits or runs */
-#define REC_UP ((ui.rec_t && !ui.rec_fired && (int32_t)(plat_ms() - ui.rec_t) >= (int32_t)REC_SHORT_MS) || lp.state != LP_IDLE || lp.req == LQ_ARM)
+#define REC_HELD (ui.rec_t && !ui.rec_fired && (int32_t)(plat_ms() - ui.rec_t) >= (int32_t)REC_SHORT_MS)
+#define REC_UP (REC_HELD || lp.state != LP_IDLE || lp.req == LQ_ARM)
 #define NTRK 8u
 #define NSTEP 16u
 #define FILT_DEAD 3                      /* FILTER: -FILT_DEAD .. +FILT_DEAD is off (seven detents wide) */
@@ -293,6 +295,11 @@ typedef struct {
     float gain;                          /* a sample from the app: what brings it to the built-in sounds' loudness */
     uint32_t delay;                      /* frames into this block before it starts */
     uint32_t life;                       /* a preview: frames until it lets go (0: none) */
+    /* a held key on a sound with no loop of its own (not a hit): it holds on a loop near the part's end (4.03) */
+    uint32_t su_a, su_b, su_x;           /* the loop [su_a, su_b) and the samples its end crosses into its start (su_b 0: none) */
+    uint32_t su_j;                       /* crossing: the next sample of the second reader (before su_a) */
+    int32_t su_pred, su_idx;             /* and its decoder */
+    uint8_t su_on;                       /* crossing now */
     uint32_t age;
     uint8_t state, track, note, seq;
 } voice_t;
@@ -376,6 +383,44 @@ static void ck_state(const sound_t *s, uint32_t block, int32_t *pred, int32_t *i
     *idx = c[2];
 }
 
+/* SUSTAIN LOOP (4.03). x is sample i of a part played forwards, once. With the key still down when the part comes to
+ * its last su_x samples before su_b, a second reader starts su_x samples before su_a and the two cross, linearly; at
+ * su_b the first goes on from su_a, where the second is: no step. Round and round while the key is down; let go, the
+ * part plays out to its end as it always did (and fades at RELEASE's pace meanwhile) */
+static void ck_state(const sound_t *s, uint32_t block, int32_t *pred, int32_t *idx);
+static inline float voice_sus(voice_t *v, float x, uint32_t i)
+{
+    const sound_t *s = v->s;
+    float y;
+    if (i + v->su_x < v->su_b)
+        return x;
+    if (!v->su_on) {
+        if (v->state != V_HELD || i >= v->su_b) {
+            v->su_b = 0;                     /* let go before the loop's end: no more rounds */
+            return x;
+        }
+        v->su_on = 1;
+        v->su_j = v->su_a - v->su_x;
+        if (!(s->flags & SF_PCM)) {          /* the second reader's decoder: from the kept state before it */
+            uint32_t q = v->su_j / SND_CK * SND_CK;
+            ck_state(s, v->su_j / SND_CK, &v->su_pred, &v->su_idx);
+            for (; q < v->su_j; q++)
+                ima_next((const uint8_t *)s->d, q, &v->su_pred, &v->su_idx);
+        }
+    }
+    y = s->flags & SF_PCM ? (float)((const int16_t *)s->d)[v->su_j]
+                          : (float)ima_next((const uint8_t *)s->d, v->su_j, &v->su_pred, &v->su_idx);
+    v->su_j++;
+    x += (y - x) * ((float)(i + v->su_x + 1u - v->su_b) / (float)v->su_x);
+    if (i + 1u >= v->su_b) {                 /* round: the first reader is the second from here */
+        v->ni = v->su_j;
+        v->pred = v->su_pred;
+        v->idx = v->su_idx;
+        v->su_on = 0;
+    }
+    return x;
+}
+
 static float voice_fetch_ed(voice_t *v)
 {
     const sound_t *s = v->s;
@@ -428,6 +473,11 @@ static float voice_fetch_ed(voice_t *v)
         }
         v->ni = i + 1u;
         x = s->flags & SF_PCM ? (float)((const int16_t *)s->d)[i] : (float)ima_next((const uint8_t *)s->d, i, &v->pred, &v->idx);
+        if (v->su_b) {
+            x = voice_sus(v, x, i);
+            if (v->su_on || v->ni != i + 1u)
+                return x;                    /* (crossing into the loop's start: this is no end, nothing fades) */
+        }
     }
     if (v->ed & ED_BAKED)
         return x;
@@ -461,7 +511,7 @@ static float voice_fetch(voice_t *v)
     }
     v->ni = i + 1u;
     if (s->flags & SF_PCM)
-        return (float)((const int16_t *)s->d)[i];
+        return v->su_b ? voice_sus(v, (float)((const int16_t *)s->d)[i], i) : (float)((const int16_t *)s->d)[i];
     {
         uint32_t code = (((const uint8_t *)s->d)[i >> 1] >> ((i & 1u) << 2)) & 15u;
         int32_t step = IMA_STEP[v->idx], d = step >> 3, p = v->pred;
@@ -476,7 +526,7 @@ static float voice_fetch(voice_t *v)
         v->pred = p;
         d = v->idx + IMA_INDEX[code & 7u];
         v->idx = d < 0 ? 0 : d > 88 ? 88 : d;
-        return (float)p;
+        return v->su_b ? voice_sus(v, (float)p, i) : (float)p;
     }
 }
 
@@ -564,6 +614,32 @@ static void voice_start(uint32_t t, uint32_t note, uint32_t vel, uint32_t delay,
             v->ni = a;
             v->apred = (int16_t)v->pred;
             v->aidx = (uint8_t)v->idx;
+        }
+    }
+    v->su_b = 0;
+    v->su_on = 0;
+    if (!seq && !(s->flags & (SF_DRUM | SF_LOOP)) && trk[t].ed_loop == ED_LOOP_AUTO && !(v->ed & ED_REV) &&
+        !(trk[t].fit && trk[t].fit < NFIT) && ((s->flags & SF_PCM) || s->ck)) {   /* (FIT: its length is the point) */
+        /* a key (or the ARP) on a sound that ends by itself, LOOP on AUTO: held, it holds on a short loop that starts
+         * 65 % into the part that plays: 2048 samples (93 ms at 22 kHz; a quarter of the part at most), brought to a
+         * whole number of the sound's pitch's periods, half of it crossed. Short, so the sound's own fading does not
+         * pulse in it; what comes after the loop is the sound's tail, which plays when the key is let go */
+        const uint32_t a = v->ed ? v->ea : 0u, b = v->ed ? v->eb : s->n, len = b - a;
+        if (len >= 512u) {
+            const float per = s->hz > 20.0f ? s->rate / s->hz : 0.0f;
+            uint32_t w = 2048u, x, at = b - len * 35u / 100u;
+            if (w > len / 4u)
+                w = len / 4u;
+            if (per >= 2.0f && per < (float)w)
+                w = (uint32_t)((float)(uint32_t)((float)w / per + 0.5f) * per + 0.5f);
+            if (at + w > b)
+                w = b - at;
+            x = w / 2u;
+            if (x >= 16u) {
+                v->su_b = at + w;
+                v->su_a = at;
+                v->su_x = x;
+            }
         }
     }
     if (trk[t].fit && trk[t].fit < NFIT) {
@@ -1577,6 +1653,7 @@ static struct {
     int8_t hot;                          /* the knob turned last (0..3), lit for a moment */
     uint32_t hot_t;
     uint8_t title;                       /* the title is up (the first TITLE_MS after a start) */
+    uint8_t rec_take;                    /* this press of REC began a take (a hold drops it; let go in time, it stays) */
     uint8_t rec_fired;                   /* REC held long enough: it cleared (letting go does nothing more) */
     uint32_t rec_t;                      /* REC went down (0: not held) */
     uint32_t loop_seen;                  /* takes finished that the screen has said */
@@ -1677,36 +1754,29 @@ static void layer_text(char *a, uint32_t n)  /* "LAYER 3" */
     text_cat(a, c);
 }
 
-/* REC, a short press: a layer starts at the next bar; again while it records: it ends where the bar it is in ends
- * (a first layer is as long as it ran, in whole bars; one on top ends by itself after once round the loop); again while
- * it still waits for the bar: it is called off. The loop lives on track 8: while there is one, track 8 is T8L */
-static void looper_rec(void)
+/* REC goes down: a layer is recorded from this moment (the transport must run), or the one recording ends: a first
+ * layer at the nearest whole number of bars, one on top where it is. Nothing is said: the top of the screen shows the
+ * take at once. The loop lives on track 8: while there is one, track 8 is T8L */
+static void looper_press(void)
 {
-    char a[20];
     if (lp.state == LP_REC) {
-        lp.req = LQ_STOP;
-        app_say("LAYER ENDS", "WITH THIS BAR");
-    } else if (lp.state == LP_ARMED || lp.req == LQ_ARM) {
-        lp.req = LQ_CANCEL;
-        app_say("TAKE", "CANCELLED");
+        if (!lp.stop)
+            lp.req = LQ_STOP;
+    } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
+        return;
     } else if (!seq_play_req) {
         app_say("Press PLAY first", "");
     } else if (lp.fading) {
         app_say("WAIT", "");
+    } else if (!lp.has && !looper_fit(pat_frames())) {
+        app_say("PATTERN TOO LONG", "TO LOOP");
     } else {
-        const uint32_t div = lp.has ? lp.div : looper_fit(pat_frames());
-        if (!div) {
-            app_say("PATTERN TOO LONG", "TO LOOP");
-            return;
-        }
         lp.own = 1;                          /* (track 8 is the looper's from here: the audio interrupt takes the take) */
+        lp.go = 0;
         lp.req = LQ_ARM;
-        if (div == 4u && !lp.has) {          /* said before the take, not found out after */
-            app_say("LONG PATTERN:", "LOOP AT 11 KHZ");
-        } else {
-            layer_text(a, lp.layers + 1u);
-            app_say(a, "FROM THE NEXT BAR");
-        }
+        ui.rec_take = 1;
+        ui.msg_until = 0;                    /* (whatever was said makes room: RECORDING shows now) */
+        ui.redraw = 1;
     }
 }
 
@@ -1996,7 +2066,6 @@ static void perform_off(void)                /* every effect off */
 
 #define SAVE_HOLD_MS 2000u                /* SAVE held this long clears the saved song */
 #define HOME_HOLD_MS 500u                 /* HOME held this long opens the city view */
-#define CITY_IDLE_MS 10000u               /* playing and nothing touched for this long: the city view */
 static void input(void)
 {
     static const uint8_t WK[16] = PLAT_WHITE_KEYS;
@@ -2154,14 +2223,22 @@ static void input(void)
         octave_step(-1);
     if (released >> B_OCTUP & 1u)
         octave_step(1);
-    /* REC is the looper's (but on the GLO page, where it is DISCONNECT). A short press, under REC_SHORT_MS: a layer
-     * starts, or the one recording ends. Held: let go between REC_UNDO_MS and REC_CLEAR_MS, the last layer goes;
+    /* REC is the looper's (but on the GLO page, where it is DISCONNECT). It acts when it goes down: a layer is recorded
+     * from there, or the one recording ends. Held: let go between REC_UNDO_MS and REC_CLEAR_MS, the last layer goes;
      * at REC_CLEAR_MS the whole loop goes, there and then. Let go between a short press and REC_UNDO_MS: nothing */
     if (ui.page != PAGE_GLO) {
         const uint32_t now = plat_ms();
         if (pressed >> B_REC & 1u) {
             ui.rec_t = now ? now : 1u;
             ui.rec_fired = 0;
+            ui.rec_take = 0;
+            looper_press();
+        }
+        if (ui.rec_take && ui.rec_t && lp.state == LP_PRE && (int32_t)(now - ui.rec_t) >= (int32_t)REC_SHORT_MS) {
+            ui.rec_take = 0;                 /* a hold, not a take: the layer on top that the press began is dropped
+                                              * (nothing of it was written: the undo is whole). A first layer records
+                                              * on: there is nothing a hold could be for until 3 s */
+            lp.req = LQ_CANCEL;
         }
         if (ui.rec_t && (btn >> B_REC & 1u) && !ui.rec_fired && (int32_t)(now - ui.rec_t) >= (int32_t)REC_CLEAR_MS) {
             ui.rec_fired = 1;
@@ -2171,13 +2248,14 @@ static void input(void)
             if (ui.rec_t && !ui.rec_fired) {
                 const int32_t held = (int32_t)(now - ui.rec_t);
                 if (held < (int32_t)REC_SHORT_MS)
-                    looper_rec();
+                    lp.go = ui.rec_take;     /* (a layer on top waited for this: it is taken) */
                 else if (held >= (int32_t)REC_UNDO_MS)
                     looper_undo();
                 else
                     app_say("REC: HOLD 3 S UNDO,", "5 S CLEAR");
             }
             ui.rec_t = 0;
+            ui.rec_take = 0;
             ui.redraw = 1;
         }
         if (ui.rec_t && (int32_t)(now - ui.rec_t) >= (int32_t)REC_SHORT_MS)
@@ -2323,7 +2401,7 @@ static void input(void)
 
     /* the lights: REC through a take (blinking while it waits for the bar); SEQ on the step page; PLAY while playing */
     ui_step_isr = ui.page == PAGE_STEP;
-    lit_btn = (lp.state == LP_REC || ((lp.state == LP_ARMED || lp.req == LQ_ARM) && (plat_ms() >> 7 & 1u)) ? 1u << B_REC : 0u) |
+    lit_btn = (lp.req == LQ_ARM || (lp.state != LP_IDLE && (!(lp.first && lp.stop) || (plat_ms() >> 7 & 1u))) ? 1u << B_REC : 0u) |
               (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
               (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT || ui.page == PAGE_EDIT2 ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (ui.page == PAGE_GLO ? 1u << B_GLO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
@@ -2407,8 +2485,8 @@ static void draw_header(void)
         cv_rect(0, 0, 44, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "SAVE", C_BLACK);
         cv_text(50, 2, &FONT_XS, "HOLD: CLEAR SAVED SONG", C_WHITE);
-        cv_rect(50, 20, 184, 5, C_LINE);
-        cv_rect(50, 20, (int32_t)(held >= SAVE_HOLD_MS ? 184u : held * 184u / SAVE_HOLD_MS), 5, C_WHITE);
+        cv_rect(42, 20, 192, 5, C_LINE);
+        cv_rect(42, 20, (int32_t)(held >= SAVE_HOLD_MS ? 192u : held * 192u / SAVE_HOLD_MS), 5, C_WHITE);
     } else if (now < ui.msg_until) {
         int32_t x = cv_text(6, 0, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
@@ -2418,9 +2496,11 @@ static void draw_header(void)
         cv_text(82, 2, &FONT_XS, pf_latch ? "LATCH: A KEY ON, AGAIN OFF" : "HOLD A WHITE KEY", C_HI);
     } else if (REC_UP) {
         /* REC is held, or a take waits or runs: said on a block, then where it stands */
-        const int32_t held = ui.rec_t && !ui.rec_fired ? (int32_t)(now - ui.rec_t) : 0;
+        int32_t held = ui.rec_t && !ui.rec_fired ? (int32_t)(now - ui.rec_t) : 0;
         const char *w;
         char c[8];
+        if (ui.rec_take && lp.state == LP_REC && lp.first && held < (int32_t)REC_UNDO_MS)
+            held = 0;                        /* (the press that began a first layer, still down: it records, and shows that) */
         t[0] = 0;
         cv_rect(0, 0, 36, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "REC", C_BLACK);
@@ -2428,28 +2508,42 @@ static void draw_header(void)
             w = lp.state != LP_IDLE ? "LET GO: CANCEL THE TAKE   HOLD: CLEAR" : "LET GO: UNDO LAYER   HOLD ON: CLEAR";
         } else if (held >= (int32_t)REC_SHORT_MS) {
             w = "HOLD 3 S: UNDO LAYER   5 S: CLEAR LOOP";
-        } else if (lp.state == LP_REC) {
+        } else if (lp.first && lp.stop) {    /* a first layer, REC pressed again: it records on to its last bar's end */
+            text_cat(t, "RECORDING ON TO ");
+            int_text(lp.bars, c);
+            text_cat(t, c);
+            text_cat(t, lp.bars == 1u ? " BAR" : " BARS");
+            w = t;
+        } else {
             text_cat(t, "RECORDING LAYER ");
             int_text(lp.layers + 1, c);
             text_cat(t, c);
-            if (lp.first) {
-                text_cat(t, "  BAR ");
-                int_text(lp.barsrec + 1, c);
+            if (lp.first && lp.maxf > lp.tk) {           /* a first layer: the time the memory still holds */
+                const uint32_t ds = (lp.maxf - lp.tk) / 4410u;
+                text_cat(t, "   ");
+                int_text((int32_t)(ds / 10u), c);
                 text_cat(t, c);
+                c[0] = '.';
+                c[1] = (char)('0' + ds % 10u);
+                c[2] = 0;
+                text_cat(t, c);
+                text_cat(t, " S LEFT");
             }
             w = t;
-        } else {
-            w = "WAITS FOR THE BAR";
         }
-        cv_text(42, 2, &FONT_XS, w, lp.state == LP_REC && held < (int32_t)REC_SHORT_MS ? C_WHITE : C_HI);
+        cv_text(42, 2, &FONT_XS, w, held < (int32_t)REC_SHORT_MS ? C_WHITE : C_HI);
         if (held >= (int32_t)REC_SHORT_MS) {             /* the hold's bar: a mark at 3 s, full at 5 s */
-            cv_rect(42, 20, 192, 5, C_LINE);
-            cv_rect(42, 20, (int32_t)((uint32_t)held >= REC_CLEAR_MS ? 192u : (uint32_t)held * 192u / REC_CLEAR_MS), 5,
+            cv_rect(50, 20, 184, 5, C_LINE);
+            cv_rect(50, 20, (int32_t)((uint32_t)held >= REC_CLEAR_MS ? 184u : (uint32_t)held * 184u / REC_CLEAR_MS), 5,
                     held >= (int32_t)REC_UNDO_MS ? C_ORANGE : C_WHITE);
-            cv_rect(42 + (int32_t)(REC_UNDO_MS * 192u / REC_CLEAR_MS), 18, 1, 9, C_WHITE);
-        } else if (lp.state == LP_REC && !lp.first && lp.total) {          /* a layer on top: how far round the loop */
-            cv_rect(42, 20, 192, 3, C_LINE);
-            cv_rect(42, 20, (int32_t)((uint64_t)(lp.tk < lp.total ? lp.tk : lp.total) * 192u / lp.total), 3, C_ORANGE);
+            cv_rect(50 + (int32_t)(REC_UNDO_MS * 184u / REC_CLEAR_MS), 18, 1, 9, C_WHITE);
+        } else {
+            /* the take's bar, running from the press: what is left, of the memory (a first layer; of its way to its
+             * last bar's end once REC was pressed again) or of the pass round the loop (a layer on top) */
+            const uint32_t of = lp.first ? (lp.stop ? lp.want : lp.maxf) : lp.total, tk = lp.tk;
+            cv_rect(50, 20, 184, 5, C_LINE);
+            if (of && tk < of)
+                cv_rect(50, 20, (int32_t)((uint64_t)(of - tk) * 184u / of), 5, C_ORANGE);
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
@@ -3191,10 +3285,6 @@ void app_frame(void)
     }
     /* track 8 is the looper's while a loop is there, or a take waits or runs; else it is its own track again */
     lp.own = (uint8_t)(lp.has || lp.state != LP_IDLE || lp.fading || lp.req == LQ_ARM);
-    if (lp.low) {                            /* a first layer went on past what 22 kHz holds */
-        lp.low = 0;
-        app_say("LONG LOOP:", "NOW AT 11 KHZ");
-    }
     if (lp.done != ui.loop_seen) {           /* a take is in */
         char a[20];
         ui.loop_seen = lp.done;
@@ -3213,9 +3303,8 @@ void app_frame(void)
     }
     {   /* the looper's state changed, or a take moves on: the screen follows */
         uint32_t st = lp.own | lp.has << 1 | lp.state << 2 | lp.undo << 4 | (uint32_t)lp.layers << 5 |
-                      (lp.state == LP_REC && lp.total ? ((lp.tk < lp.total ? lp.tk : lp.total) * 32u / lp.total) << 13 : 0u) |
-                      (lp.state == LP_REC && lp.first ? (uint32_t)lp.barsrec << 21 : 0u) |
-                      (lp.state == LP_ARMED ? (now >> 7 & 1u) << 20 : 0u);
+                      (lp.state != LP_IDLE ? (lp.tk / 2205u & 0xFFu) << 13 : 0u) |      /* (its bar: 20 times a second) */
+                      (lp.first && lp.stop ? (now >> 7 & 1u) << 21 | 1u << 22 : 0u);
         if (st != ui.loop_drawn) {
             ui.loop_drawn = st;
             ui.redraw = 1;
@@ -3230,12 +3319,7 @@ void app_frame(void)
         last_step = seq_step_now;
         ui.redraw = 1;
     }
-    /* the city view: by itself while the pattern plays on the tracks' page and nothing has been touched for a while
-     * (never over another page, nor in the looper's mode, where the next press must count: its first touch only
-     * closes it); it goes when the pattern stops, unless HOME opened it */
-    if (!city.stage && seq_play_req && ui.page == PAGE_PLAY && !ui.title && lp.state == LP_IDLE &&
-        lp.req != LQ_ARM && !ui.sv_t && !ui.rec_t && now - ui.idle_t >= CITY_IDLE_MS)
-        city_open(0);
+    /* the city view comes only when HOME is held (since 4.03: never by itself); its first touch only closes it */
     if (city.stage && !city.manual && !seq_play_req)
         city_close();
     if (city.stage) {
@@ -3380,7 +3464,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "dump_waits"))
         *got = dump.n != 0u;
     else if (!strcmp(what, "dump_loop_ok"))  /* the loop's pieces as they went, in order, are the loop: their CRC is its CRC */
-        *got = lp.has && dump.next && ~dump.crc == ~dump_crc(0xFFFFFFFFu, (const uint8_t *)loop_m[lp.cur], lp.total / lp.div * 2u);
+        *got = lp.has && dump.next && dump.crc == dump_loop_crc(lp.total / 2u);
     else if (!strcmp(what, "dump_pieces"))   /* the loop's pieces sent since piece 0 */
         *got = (int)dump.next;
     else if (!strcmp(what, "loop_ver"))

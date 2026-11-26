@@ -58,6 +58,7 @@ static void perform_begin(void)
     if (lp.state != LP_IDLE)                 /* a take: its sound is not to be bent, its block not to be borrowed */
         on &= ~PK_NOTAKE;
     pb.want = (uint8_t)(perform_block_free() ? pf_buf : 0u);
+    lp.hold = pb.cur != 0u;                  /* (a take that has begun writes there only once this is over) */
     if (!on && !pb.want && !pb.cur && !pf_run) {
         return;                              /* idle: nothing */
     }
@@ -97,7 +98,7 @@ static float perform_sends(const float *y, uint32_t n)
 
 static void perform_buffer(float *l, float *r, uint32_t n, int32_t boff, float sf)
 {
-    int16_t *b = loop_m[lp.cur ^ 1u];
+    int16_t *b = loop_m[lp.cur ^ 1u];        /* (LOOP_PCM 16-bit samples of it: looper.c) */
     uint32_t i;
     for (i = 0; i < n; i++) {
         float wl = 0.0f, wr = 0.0f, to = 0.0f;
@@ -112,8 +113,8 @@ static void perform_buffer(float *l, float *r, uint32_t n, int32_t boff, float s
                 pb.len = (uint32_t)(sf * (sf * 2.0f <= 22000.0f ? 1.0f : 0.5f));     /* an eighth (a sixteenth when slow) */
             else if (pb.cur)
                 pb.len = (uint32_t)(sf * (pb.cur == 1u + PK_REP8 ? 1.0f : pb.cur == 1u + PK_REP16 ? 0.5f : 0.25f));
-            if (pb.len > LOOP_CAP / 2u - 2u)
-                pb.len = LOOP_CAP / 2u - 2u;
+            if (pb.len > LOOP_PCM / 2u - 2u)
+                pb.len = LOOP_PCM / 2u - 2u;
             if (pb.len < 64u)
                 pb.len = 64u;
         }

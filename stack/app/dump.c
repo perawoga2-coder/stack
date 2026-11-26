@@ -105,6 +105,18 @@ static void dump_make(void)
     put32(h + 10, ~dump_crc(0xFFFFFFFFu, dump_song + 16, DUMP_LEN - 16u));
 }
 
+static uint32_t dump_loop_crc(uint32_t len)  /* of the loop that plays, as its 16-bit samples (not yet inverted) */
+{
+    uint8_t b[128];
+    uint32_t c = 0xFFFFFFFFu, k;
+    for (k = 0; k < len; k += 64u) {
+        const uint32_t n = len - k < 64u ? len - k : 64u;
+        loop_pcm(lp.cur, k, n, b, len);
+        c = dump_crc(c, b, n * 2u);
+    }
+    return c;
+}
+
 static void dump_put(uint32_t v) { dump.out[dump.n++] = (uint8_t)(v & 0x7Fu); }
 static void dump_pack(const uint8_t *p, uint32_t n)      /* 8-bit bytes as the app's messages carry them: 7 to 8 */
 {
@@ -162,15 +174,16 @@ static void dump_sysex(uint32_t cmd, const uint8_t *a, uint32_t na)
         if (off < DUMP_LEN)
             dump_pack(dump_song + off, DUMP_LEN - off < DUMP_PIECE ? DUMP_LEN - off : DUMP_PIECE);
     } else {
-        /* the loop that plays: the samples of its block, 16 bits each. Read here while the audio interrupt plays it:
-         * the number lp.ver says if it was another by the time the app has all the pieces */
-        const uint32_t has = lp.has && !lp.fading, len = has ? lp.total / (lp.div ? lp.div : 2u) : 0u, ver = lp.ver & 0x3FFFu;
-        const uint8_t *d = (const uint8_t *)loop_m[lp.cur];
+        /* the loop that plays: the samples of its block, 16 bits each (decoded here: the block holds them as ADPCM,
+         * looper.c). Read while the audio interrupt plays it: the number lp.ver says if it was another by the time
+         * the app has all the pieces */
+        const uint32_t has = lp.has && !lp.fading, len = has ? lp.total / 2u : 0u, ver = lp.ver & 0x3FFFu;
+        uint8_t d[DUMP_PIECE];
         if (cmd == 31u) {                    /* LOOP INFO: has, rate, samples, layers, its number, its CRC */
-            const uint32_t crc = has ? ~dump_crc(0xFFFFFFFFu, d, len * 2u) : 0u;
+            const uint32_t crc = has ? ~dump_loop_crc(len) : 0u;
             uint8_t c4[4];
             dump_put(has);
-            dump_put(lp.div == 4u ? 1u : 0u);            /* 0: 22 050 Hz, 1: 11 025 Hz */
+            dump_put(0);                                 /* 0: 22 050 Hz (1, 11 025 Hz, up to 4.02) */
             dump_put(len);
             dump_put(len >> 7);
             dump_put(len >> 14);
@@ -185,15 +198,17 @@ static void dump_sysex(uint32_t cmd, const uint8_t *a, uint32_t na)
             dump_put(piece >> 7);
             dump_put(ver);
             dump_put(ver >> 7);
-            if (n)
-                dump_pack(d + off, n);
+            if (n) {
+                loop_pcm(lp.cur, off / 2u, n / 2u, d, len);
+                dump_pack(d, n);
+            }
 #ifdef PLAT_HOST
             if (!piece) {
                 dump.crc = 0xFFFFFFFFu;
                 dump.next = 0;
             }
             if (piece == dump.next && n) {
-                dump.crc = dump_crc(dump.crc, d + off, n);
+                dump.crc = dump_crc(dump.crc, d, n);
                 dump.next++;
             }
 #endif

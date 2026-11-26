@@ -235,9 +235,9 @@ def keys(out, folder):
     L += ["# (the clock goes out since 0.4.2: what is checked is that no note does)", "expect notes_out 0", "tap OCT+", "wait 30", "tap OCT+", "wait 30", "expect octave 0", "wav keys_all.wav"]
     for k in range(27):
         L += [f"key {k} down 100", "wait 120", f"key {k} up", "wait 60"]
-    L += ["wavstop", "expect lim_clips 0", "# held past its end, the sample stops: nothing after it is played",
-          "key 26 down 100", "wait 900", "expect voices 0", "key 26 up", "key 0 down 100", "wait 1500", "expect voices 0",
-          "key 0 up", "expect store_writes 0"]
+    L += ["wavstop", "expect lim_clips 0", "# held past its end the sample holds on (4.03: its last third goes round); let go, it ends",
+          "key 26 down 100", "wait 900", "expect voices 1", "key 26 up", "wait 500", "expect voices 0",
+          "key 0 down 100", "wait 1500", "expect voices 1", "key 0 up", "wait 900", "expect voices 0", "expect store_writes 0"]
     open(out, "w").write("\n".join(L) + "\n")
     print(f"{out}: {len(L)} lines")
 

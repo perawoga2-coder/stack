@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.02-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.03-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -37,7 +37,7 @@ This is the page you see after the start. It lists the eight tracks, T1 to T8.
 | MASTER | The volume of the FM-1's speaker and headphone jack. |
 | PLAY | Starts and stops the sequencer. |
 | SELECT knob | The tempo, 40 to 240 BPM. One click is 1 BPM. It works on every page. |
-| REC | The looper. A short press records a layer. See "The looper (REC)". |
+| REC | The looper. Press it and it records at once. See "The looper (REC)". |
 
 ### The sound list
 
@@ -134,8 +134,19 @@ Press EDIT to open page 1. It changes how the selected track plays its sound.
 |---|---|
 | K1 START | Where the sound starts, in per cent. |
 | K2 REVERSE | ON plays the sound backwards. |
-| K3 LOOP | AUTO plays the sound as it is. OFF plays it once. ON loops it. |
+| K3 LOOP | AUTO plays the sound as it is, and holds it while you hold a key (see below). OFF plays it once. ON loops it. |
 | K4 LENGTH | How much of the sound plays after START. 100% is to the end. |
+
+**Long notes (LOOP on AUTO).** Hold a key and the note sounds for as long as you hold it, also on sounds that
+end by themselves (piano, plucks, bells, some basses and FX, and your own samples MY 1 to 3). When the sound has
+played about two thirds of its length, it holds on a short loop there. Let go and the rest of the sound plays out
+and fades as RELEASE says. START and LENGTH move the place: a shorter LENGTH holds an earlier, louder part.
+
+- Drums play once, as always.
+- Steps of the sequencer play the sound once, as always. Only keys you hold (and the ARP's notes) are held.
+- LOOP OFF plays the sound once, also under a held key. A sound that FIT stretches to bars is not held either.
+- A held note has a steady, organ-like tone. It no longer fades by itself, so a piano held for long does not
+  sound like a real piano.
 
 Only four notes can play backwards at the same time. On a sample from Burger Studio, EDIT works a moment after the
 sample has arrived.
@@ -177,20 +188,25 @@ Hold a chord and it runs. Let go and it stops. It runs in time with the sequence
 ![The looper records a layer](img/looper.png)
 
 Track 8 can be a looper. It records what you play and plays it back in a loop, in time with the sequencer.
-There is no looper mode: the REC button does everything, on every page except GLO.
+The REC button does everything, on every page except GLO. **Recording starts the moment you press REC.** Nothing
+waits for a bar.
 
 1. Press PLAY. The looper only records while the sequencer runs.
 2. Select a track from T1 to T7.
-3. Press REC shortly. The REC light blinks. Recording starts at the next bar, and the light stays on.
-4. Play the keys. What you play becomes the first layer of the loop.
-5. Press REC shortly again. Recording stops at the end of the bar you are in. The loop starts to play.
-6. To add a layer, press REC shortly again. It starts at the next bar. It stops by itself after one round of the
-   loop, or at the end of the bar when you press REC before that.
+3. Press REC and play. The REC light is on and the top of the screen says `RECORDING LAYER 1`. A bar on the screen
+   runs down: it shows how much recording time is left, with the seconds.
+4. Press REC again when you are done. The looper makes the loop a whole number of bars long, the number nearest
+   to what you played. So the loop stays in time.
+   - If that is a little longer than you played, it records on to the end (the REC light blinks, the screen says
+     `RECORDING ON TO 2 BARS`) and then plays.
+   - If it is a little shorter, the loop is cut there and plays at once.
+5. To add a layer, press REC again and play. It records from that moment, on top of the loop. It stops by itself
+   after one round of the loop, or when you press REC again. The bar on the screen shows how much of the round is
+   left.
 
 | REC | What it does |
 |---|---|
-| Short press (less than half a second) | Starts a layer at the next bar. While it records: stops it at the end of the bar. |
-| Short press while the light blinks | Cancels the layer that waits for its bar. |
+| Short press (less than half a second) | Records a layer, from the press. While it records: ends it. |
 | Hold 3 seconds, then let go | Removes the last layer. Only one layer can be removed. |
 | Hold 5 seconds | Clears the whole loop. It happens at 5 seconds; you do not have to let go. |
 | Hold less than 3 seconds, then let go | Nothing. |
@@ -198,20 +214,23 @@ There is no looper mode: the REC button does everything, on every page except GL
 While you hold REC, a bar fills at the top of the screen. A mark shows the 3 seconds, and the text says what will
 happen when you let go.
 
-- **The length of the loop** is set by the first layer: the whole bars from its start to the bar where you
-  pressed REC again. Later layers have that same length.
-- **The memory holds 4 seconds.** At 120 BPM that is 2 bars; at 240 BPM it is 4 bars. When the memory is full, the
-  first layer stops by itself and the screen says `LOOP FULL`.
-- A loop of up to 2 seconds is recorded at full quality. A longer one is recorded at half quality (11 kHz, a
-  duller sound). The screen says so.
-- If one bar is longer than 4 seconds (4/4 below 60 BPM), the looper cannot record. The screen says
-  `PATTERN TOO LONG TO LOOP`.
+- **The loop need not start on the first beat.** It starts where you pressed REC. Because its length is whole
+  bars, it comes round at the same place of the bar every time.
+- **The length of the loop** is set by the first layer. The shortest loop is 1 bar. Later layers have the same
+  length.
+- **The memory holds 8 seconds.** At 120 BPM in 4/4 that is 4 bars; at 240 BPM it is 8 bars; at 60 BPM, 2 bars.
+  When the memory is full, the first layer stops by itself and the screen says `LOOP FULL`.
+- **The sound of the loop.** To hold 8 seconds, the loop is stored compressed. You can hear a little noise with
+  the sound, most on bright sounds and cymbals. Bass and soft sounds stay clean.
 - Only what you play by hand is recorded. The sequencer's own steps are not recorded.
 - While a loop exists, track 8 shows T8L and plays the loop. Track 8's own sound and steps are silent then. They
   come back when you clear the loop.
 - On T8L the keys are silent. Select T1 to T7 to play. The knobs, FX and MUTE of track 8 work on the loop.
-- If you hold REC for 3 seconds while a layer records, that layer is cancelled.
+- A layer on top is only kept when you let go of REC within half a second. If you hold REC longer, that layer is
+  dropped and the loop stays as it was. So holding REC to remove a layer never records anything.
+- If you hold the REC press that ends a layer for 3 seconds, the layer you just made is removed again.
 - Starting a new layer means the layer before it can no longer be removed.
+- If you stop the sequencer while a layer records, that layer is dropped.
 - The loop is gone when you switch off.
 - If you change the tempo or the time signature, the loop no longer fits. The screen says `LOOP OUT OF TIME`.
   Clear the loop and record it again.
@@ -332,7 +351,8 @@ What is **not** saved: the loop on track 8, and the samples themselves.
 
 ![The city view: six poles with coloured lamps, and lights along the road](img/city.png)
 
-While the sequencer plays and you touch nothing for ten seconds, the screen shows a city at night.
+Hold HOME for half a second and the screen shows a city at night: a rest for the eyes. It never appears by
+itself.
 
 Six poles stand along the street. Each pole carries a lamp. A lamp is the level meter of one group of sounds, and
 each group has its own colour. The louder the group, the brighter the lamp and the more of it is lit. A new hit
@@ -352,6 +372,5 @@ is the right channel. They run from the far end towards you. Green is quiet, yel
 
 - Press any button or turn any knob to go back. That first touch only brings the page back. It changes nothing.
 - The keys still play while the city shows.
-- Hold HOME to open the city view at any time.
-- It does not appear on the other pages, while the looper records, or while you hold REC.
-- REC is the exception to the first touch: it closes the city view and counts at once, so a layer starts on time.
+- HOME opens it at any time, on any page, playing or stopped. It stays until you touch something.
+- REC is the exception to the first touch: it closes the city view and records at once.

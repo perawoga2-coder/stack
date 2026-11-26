@@ -637,15 +637,16 @@ expect track 6
 tap PLAY
 wait 100
 tap REC
-wait 2300
+wait 300
 key w4 down 100
 wait 300
 key w4 up
+wait 600
 tap REC
 wait 2000
 expect loop_layers 1
 tap REC
-wait 2300
+wait 300
 key w8 down 100
 wait 300
 key w8 up

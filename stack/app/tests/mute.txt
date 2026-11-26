@@ -115,8 +115,7 @@ wait 60
 tap REC
 wait 60
 expect loop_state >0
-tap REC
-wait 60
-expect loop_state 0
+# (the pattern stopped under it: the take is dropped)
 tap PLAY
 wait 100
+expect loop_state 0

@@ -7,6 +7,47 @@ turn ALGO 4
 wait 40
 expect track 5
 expect sound 33
+# --- a held key holds on (4.03): the piano is a second long; held 3 s it still sounds (a short loop late in it);
+# let go, its tail plays out and it ends
+wav edit_sustain_piano.wav
+key w4 down 100
+wait 2500
+expect voices 1
+peakreset
+wait 500
+expect peak_db_min -40
+key w4 up
+wait 1500
+expect voices 0
+wavstop
+# LOOP OFF: once, as before: held past its end it is over
+tap EDIT
+wait 40
+turn K3 1
+wait 40
+expect ed_loop 1
+key w4 down 100
+wait 1500
+expect voices 0
+key w4 up
+turn K3 -1
+wait 40
+expect ed_loop 0
+tap EDIT
+wait 40
+tap EDIT
+wait 40
+expect page 0
+# a hit is a hit: the kick held plays once
+turn ALGO -4
+wait 40
+key w4 down 100
+wait 1500
+expect voices 0
+key w4 up
+turn ALGO 4
+wait 40
+expect track 5
 # EDIT: its page and back, as FX, ENV and LFO
 tap EDIT
 wait 40
@@ -30,6 +71,8 @@ wait 100
 expect v_ed 0
 wait 700
 expect voices 1
+# (a held key now holds on past the part's end: 4.03, tested below; let go, it ends)
+key w4 up
 wait 400
 expect voices 0
 key w4 up
@@ -69,6 +112,8 @@ expect v_ni >11025
 expect v_ni <12000
 wait 380
 expect voices 1
+# (a held key now holds on past the part's end: 4.03, tested below; let go, it ends)
+key w4 up
 wait 250
 expect voices 0
 key w4 up
@@ -85,6 +130,8 @@ wav edit_length_30.wav
 key w4 down 100
 wait 200
 expect voices 1
+# (a held key now holds on past the part's end: 4.03, tested below; let go, it ends)
+key w4 up
 wait 250
 expect voices 0
 key w4 up

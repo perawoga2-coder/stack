@@ -691,13 +691,17 @@ key 26 up
 wait 60
 wavstop
 expect lim_clips 0
-# held past its end, the sample stops: nothing after it is played
+# held past its end the sample holds on (4.03: its last third goes round); let go, it ends
 key 26 down 100
 wait 900
-expect voices 0
+expect voices 1
 key 26 up
+wait 500
+expect voices 0
 key 0 down 100
 wait 1500
-expect voices 0
+expect voices 1
 key 0 up
+wait 900
+expect voices 0
 expect store_writes 0
