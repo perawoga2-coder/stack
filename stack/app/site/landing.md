@@ -1,6 +1,6 @@
 # STACK
 
-![Record crates stacked on top of each other, with a few records leaning beside them](img/cover.png "STACK")
+![Psychedelic mushrooms drawn in letters, rainbow caps on a dotted black ground](img/cover.png "STACK")
 
 STACK is a firmware for the M-VAVE FM-1 by Maker Hip. Eight tracks, each with one sound from a single list; the keys
 play the selected track, and four knobs shape it: pitch, a DJ filter, decay and level.
