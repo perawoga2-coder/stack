@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.07-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.09-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -236,8 +236,10 @@ Nothing waits for a bar, and you do not have to press PLAY first.
 | Hold less than 3 seconds, then let go | Nothing. |
 
 While you hold REC, a bar fills at the top of the screen. A mark shows the 3 seconds, and the text says what will
-happen when you let go: `LET GO: UNDO LAYER`, or `LET GO: NO UNDO` when there is no layer that can be
-removed.
+happen. Before 3 seconds: `HOLD 3 S: UNDO LAYER  5 S: CLEAR LOOP`, or `HOLD 3 S: NO UNDO` when there is no layer
+that can be removed. After 3 seconds: `LET GO: UNDO LAYER  HOLD ON: CLEAR`, or `LET GO: NO UNDO`. While a layer
+records, letting go cancels it: `LET GO: CANCEL TAKE`. With no loop at all the text says
+`NO LOOP: NOTHING TO UNDO OR CLEAR`.
 
 - **The loop need not start on the first beat.** It starts where you pressed REC. Because its length is whole
   bars, it comes round at the same place of the bar every time.
@@ -260,7 +262,8 @@ removed.
   own sounds again, and the next first layer goes to track 8.
 - If the selected track is the one that holds the loop (T8L or T7L), the bottom line of the screen shows `LOOP` and
   its length, for example `LOOP 2 BARS`, where other tracks show their sound's group and place. The keys are
-  silent. Play a key there and the screen says `THE LOOP'S TRACK: SELECT ANOTHER`. Select another track to play.
+  silent. Play a key there and the screen says `THE LOOP'S TRACK: SELECT ANOTHER` (but not while a layer records: the top
+of the screen keeps showing the recording). Select another track to play.
   Selecting T8L or T7L only to set the loop's LEVEL says nothing.
 - The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.

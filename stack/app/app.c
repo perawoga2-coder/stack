@@ -172,7 +172,8 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the group and the p
 #define REC_CLEAR_MS 5000u               /* REC held this long: the whole loop goes */
 /* the header says what REC is doing: it is held past a short press, or a take waits or runs */
 #define REC_HELD (ui.rec_t && !ui.rec_fired && (int32_t)(plat_ms() - ui.rec_t) >= (int32_t)REC_SHORT_MS)
-#define REC_UP (REC_HELD || lp.state != LP_IDLE || lp.req == LQ_ARM)
+#define LP_TAKE (lp.state != LP_IDLE || lp.req == LQ_ARM)   /* a take waits or runs */
+#define REC_UP (REC_HELD || LP_TAKE)
 #define NTRK 8u
 #define NSTEP 16u
 #define FILT_DEAD 3                      /* FILTER: -FILT_DEAD .. +FILT_DEAD is off (seven detents wide) */
@@ -1815,8 +1816,10 @@ static struct {
 #ifdef PLAT_HOST                             /* what REC's hold line and the bottom line's corner said (expect scr_) */
 static char host_hold[48], host_corner[24];
 #define HOST_KEEP(b, s) (strncpy(b, s, sizeof b - 1u))
+#define HOST_DROP(b) ((b)[0] = 0)
 #else
 #define HOST_KEEP(b, s) ((void)0)
+#define HOST_DROP(b) ((void)0)
 #endif
 
 void app_say(const char *a, const char *b)
@@ -1893,7 +1896,11 @@ static void speak(void)                      /* a screen reader that asks hears 
  * place, and the sound */
 /* ------------------------------------------------------------------ the looper's side of the panel --- */
 static int on_t8l(void) { return ui.sel == lp.trk && lp.own; }   /* the looper's track (T8L or T7L) is selected */
-static void say_t8l(void) { app_say("THE LOOP'S TRACK:", "SELECT ANOTHER"); }
+static void say_t8l(void)                    /* (not over a take: the top of the screen shows the recording) */
+{
+    if (!LP_TAKE)
+        app_say("THE LOOP'S TRACK:", "SELECT ANOTHER");
+}
 
 static void bars_cat(char *a)                /* + "2 BARS": the loop's length */
 {
@@ -1921,7 +1928,7 @@ static void looper_press(void)
     if (lp.state == LP_REC) {
         if (!lp.stop)
             lp.req = LQ_STOP;
-    } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
+    } else if (LP_TAKE) {
         return;
     } else if (!seq_play_req && ck_follow) {
         app_say("REC: THE CLOCK", "MUST RUN FIRST");     /* (the transport is the clock's to start) */
@@ -1946,7 +1953,7 @@ static void looper_press(void)
 static void looper_undo(void)                /* REC held 3 to 5 s: the take under way is dropped, or the newest layer goes */
 {
     char a[20];
-    if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
+    if (LP_TAKE) {
         lp.req = LQ_CANCEL;
         app_say("TAKE", "CANCELLED");
     } else if (lp.undo) {
@@ -1964,7 +1971,7 @@ static void looper_undo(void)                /* REC held 3 to 5 s: the take unde
 
 static void looper_clear(void)               /* REC held 5 s: the whole loop goes; tracks 7 and 8 are their own again */
 {
-    if (lp.has || lp.state != LP_IDLE || lp.req == LQ_ARM) {
+    if (lp.has || LP_TAKE) {
         lp.req = LQ_CLEAR;
         app_say("LOOP CLEARED", "");
     } else {
@@ -2397,6 +2404,7 @@ static void input(void)
         if (pressed >> B_REC & 1u) {
             ui.rec_t = now ? now : 1u;
             ui.rec_fired = 0;
+            HOST_DROP(host_hold);
             ui.rec_take = 0;
             looper_press();
         }
@@ -2449,7 +2457,7 @@ static void input(void)
             /* (the looper's: above) */
         } else if (k == B_PLAY) {
             seq_play_req = (uint8_t)!seq_play_req;
-            if (!seq_play_req && (lp.state != LP_IDLE || lp.req == LQ_ARM))
+            if (!seq_play_req && LP_TAKE)
                 app_say("STOP:", "TAKE CANCELLED");  /* (a take cannot outlast the transport) */
             else
                 app_say(seq_play_req ? "PLAY" : "STOP", "");
@@ -2666,12 +2674,13 @@ static int32_t tag(int32_t xr, const char *s, uint16_t c)   /* a box on the vers
 
 static void draw_header(void)
 {
-    char t[28];
+    char t[44];
     int32_t xr = 240;
     uint32_t now = plat_ms();
     const uint32_t svh = ui.sv_t && !ui.sv_fired && (int32_t)(now - ui.sv_t) > 400;
     /* a bar on the second line (SAVE held, or REC's): it has the line to itself, after the version */
     const uint32_t bar = svh || (REC_UP && now >= ui.msg_until && !ui.perform);
+    HOST_DROP(host_hold);
     cv_begin(240, 28, C_BLACK);
     /* two lines: the first is the name row or a message; the second, small, is the version, always there (the build's
      * APP_VERSION: stack/VERSION, the one place it is written) */
@@ -2700,13 +2709,19 @@ static void draw_header(void)
         t[0] = 0;
         cv_rect(0, 0, 36, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "REC", C_BLACK);
-        if (held >= (int32_t)REC_UNDO_MS) {
-            /* (no undo: PERFORM took its block, one layer, no loop; letting go says which) */
-            w = lp.state != LP_IDLE ? "LET GO: CANCEL THE TAKE   HOLD: CLEAR"
-                : lp.undo ? "LET GO: UNDO LAYER   HOLD ON: CLEAR" : "LET GO: NO UNDO   HOLD ON: CLEAR";
+        if (held >= (int32_t)REC_SHORT_MS) {
+            /* what letting go at 3 s does (as looper_undo has it) and what 5 s does: no loop, nothing to either; no
+             * undo (PERFORM took its block, one layer), letting go says which */
+            const int u = held >= (int32_t)REC_UNDO_MS, take = LP_TAKE && lp.req != LQ_CANCEL;   /* (not one going) */
+            w = t;
+            if (!lp.has && !take) {
+                w = "NO LOOP: NOTHING TO UNDO OR CLEAR";
+            } else {
+                text_cat(t, u ? "LET GO: " : "HOLD 3 S: ");
+                text_cat(t, take ? "CANCEL TAKE" : lp.undo ? "UNDO LAYER" : "NO UNDO");
+                text_cat(t, u ? "  HOLD ON: CLEAR" : "  5 S: CLEAR LOOP");
+            }
             HOST_KEEP(host_hold, w);
-        } else if (held >= (int32_t)REC_SHORT_MS) {
-            w = "HOLD 3 S: UNDO LAYER   5 S: CLEAR LOOP";
         } else if (lp.first && lp.stop) {    /* a first layer, REC pressed again: it records on to its last bar's end */
             text_cat(t, "RECORDING ON TO ");
             bars_cat(t);
@@ -2887,6 +2902,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     const track_t *t = &trk[ui.sel];
     uint32_t k, now = plat_ms();
     char v[12];
+    HOST_DROP(host_corner);
     cv_begin(240, 52, C_BLACK);
     cv_rect(0, 0, 240, 1, C_LINE);
     if (ui.page >= PAGE_EDIT) {              /* the EDIT, ARP, GLO and EQ pages: their four knobs and their values */
@@ -3661,8 +3677,8 @@ int app_expect(const char *what, int *got)
         *got = lp.layers;
     else if (!strncmp(what, "msg_", 4) || !strncmp(what, "scr_", 4)) {
         /* msg_TEXT: the header's message now has TEXT in it ('_' a space): 1, else 0. scr_TEXT: the same of what is
-         * drawn: REC's hold line (held 3 s on) and the bottom line's corner (the track page) */
-        char t[72], w[48];
+         * drawn: REC's hold line (held half a second on) and the bottom line's corner (the track page) */
+        char t[sizeof host_hold + sizeof host_corner + 4u], w[48];
         uint32_t i;
         const int msg = what[0] == 'm';
         for (i = 0; what[4u + i] && i < 47u; i++)
@@ -3674,7 +3690,7 @@ int app_expect(const char *what, int *got)
             text_cat(t, " ");
             text_cat(t, ui.msg[1]);
         } else if (!msg) {
-            text_cat(t, ui.rec_t && plat_ms() - ui.rec_t >= REC_UNDO_MS ? host_hold : "");
+            text_cat(t, ui.rec_t && !ui.rec_fired ? host_hold : "");    /* (as drawn: cleared where each is drawn) */
             text_cat(t, " | ");
             text_cat(t, host_corner);
         }

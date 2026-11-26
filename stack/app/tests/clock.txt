@@ -724,3 +724,27 @@ expect loop_has 1
 shot clock_tempo_changed.png
 clock 40 22
 shot clock_loop_out_of_time.png
+# --- 4.09: REC held with no loop and no take (the clock is stopped: REC cannot start one). The hold's line does not
+# promise an undo or a clear: NO LOOP
+press REC
+clock 260 20
+release REC
+clock 10 20
+expect loop_has 0
+clock 1 18
+midi FC 00 00
+clock 10 20
+expect playing 0
+expect clk_follow 1
+press REC
+clock 5 20
+expect msg_MUST_RUN_FIRST 1
+clock 95 20
+expect scr_NO_LOOP:_NOTHING_TO_UNDO_OR_CLEAR 1
+expect scr_5_S:_CLEAR 0
+clock 65 20
+expect scr_NO_LOOP:_NOTHING_TO_UNDO_OR_CLEAR 1
+expect scr_HOLD_ON 0
+release REC
+clock 5 20
+expect msg_NO_LAYER_TO_UNDO 1

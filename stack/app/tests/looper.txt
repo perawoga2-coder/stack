@@ -319,6 +319,8 @@ wait 300
 expect loop_state 0
 wait 900
 shot looper_hold_early.png
+# (4.09: the hold's line before 3 s follows the undo too: here there is one)
+expect scr_HOLD_3_S:_UNDO_LAYER__5_S:_CLEAR_LOOP 1
 release REC
 wait 60
 expect loop_layers 3
@@ -334,9 +336,13 @@ expect loop_layers 2
 expect loop_undo 0
 expect loop_has 1
 expect loop_trk 7
-# again: only one layer can be undone
+# again: only one layer can be undone (4.09: the hold's line says so before 3 s too, and the 3 s line)
 press REC
-wait 3500
+wait 1500
+expect scr_HOLD_3_S:_NO_UNDO__5_S:_CLEAR_LOOP 1
+expect scr_UNDO_LAYER 0
+wait 2000
+expect scr_LET_GO:_NO_UNDO__HOLD_ON:_CLEAR 1
 release REC
 wait 200
 expect loop_layers 2
@@ -404,6 +410,8 @@ wait 300
 press REC
 wait 3300
 expect loop_state 2
+# (4.09: the 3 s line says what letting go does, as looper_undo has it: the take goes; HOLD ON as the others say)
+expect scr_LET_GO:_CANCEL_TAKE__HOLD_ON:_CLEAR 1
 release REC
 wait 100
 expect loop_state 0
@@ -834,3 +842,34 @@ wait 40
 tap PLAY
 wait 200
 expect lim_clips 0
+# --- 4.09: a key on the loop's track while a take runs: the header stays the take's (RECORDING LAYER, the time
+# left); THE LOOP'S TRACK: SELECT ANOTHER does not cover it. Once the take is in, the key says it again
+expect loop_has 0
+expect loop_trk 8
+tap REC
+wait 60
+expect loop_state 2
+turn ALGO 7
+wait 60
+expect track 8
+key 7 down 100
+wait 60
+expect voices 0
+expect msg_SELECT_ANOTHER 0
+key 7 up
+turn PRESET 1
+wait 60
+expect msg_SELECT_ANOTHER 0
+tap REC
+wait 2500
+expect loop_state 0
+expect loop_has 1
+expect loop_trk 7
+turn ALGO -1
+wait 60
+expect track 7
+key 7 down 100
+wait 60
+expect msg_THE_LOOP'S_TRACK:_SELECT_ANOTHER 1
+key 7 up
+wait 20
