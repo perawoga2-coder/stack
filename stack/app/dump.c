@@ -71,7 +71,7 @@ static void dump_make(void)
         const char *nm = "", *cn = "";
         uint32_t kind = 0;
         p[1] = 255;
-        if (t == NTRK - 1u && lp.own) {
+        if (t == lp.trk && lp.own) {
             kind = 3;
             nm = "LOOP";
         } else if (li >= 1u && li <= NSOUNDS) {

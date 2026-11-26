@@ -1112,6 +1112,14 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         last = seq_running ? seq_phase : 0.0f;
     }
     perform_begin();
+    if (lp.swap) {                           /* a take came in last block: the loop lives on the other of tracks 7 and 8
+                                              * from this block on. Its bus goes with it as it stands (the filters' and
+                                              * the level's state), so nothing steps where the two tracks are set alike */
+        const uint32_t to = lp.trk == NTRK - 1u ? NTRK - 2u : NTRK - 1u;
+        lp.swap = 0;
+        bus[to] = bus[lp.trk];
+        lp.trk = (uint8_t)to;
+    }
     if (arp.n || arp.on)
         arp_block(n);
     for (i = 0; i < n; i++)
@@ -1126,7 +1134,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         float lfo_p0 = 0.0f, lfo_dp = 0.0f, lfo_d = 0.0f, lfo_v = 0.0f, pan_t = 0.0f;   /* the LFO this block */
         uint32_t lfo_on = trk[t].lfo_a != 0u, lfo_to = trk[t].lfo_t, lfo_sh = trk[t].lfo_s;
         env_t ev;
-        uint32_t any = 0, anyr = 0, ft[2], fs[2], q, loop8 = t == NTRK - 1u && lp.own;
+        uint32_t any = 0, anyr = 0, ft[2], fs[2], q, loop8 = t == lp.trk && lp.own;
         for (q = 0; q < 2u; q++) {               /* the two slots: what, which side, how much */
             ft[q] = trk[t].fx[q] < NFX ? trk[t].fx[q] : FX_OFF;
             fa[q] = fx_amount(trk[t].fxk[q], &fs[q]);
@@ -1528,7 +1536,7 @@ static void song_my_place(void)              /* the tracks that wait for a sampl
     uint32_t t;
     for (t = 0; t < NTRK; t++)
         if (song_my[t].slot && my[song_my[t].slot - 1u].valid && my_crc_of(song_my[t].slot - 1u) == song_my[t].crc &&
-            !trk[t].sound && !(t == NTRK - 1u && lp.own)) {
+            !trk[t].sound && !(t == lp.trk && lp.own)) {
             trk[t].sound = (uint8_t)(NSOUNDS + song_my[t].slot);
             song_my[t].slot = 0;
             song_drawn = 0;
@@ -1742,7 +1750,7 @@ static void speak(void)                      /* a screen reader that asks hears 
 /* PRESETS: the selected track's sound, one place along the list; the list stops at its ends. Only the sound changes:
  * the knobs' values, the steps and the other tracks stay. The screen says the old and the new */
 /* ------------------------------------------------------------------ the looper's side of the panel --- */
-static int on_t8l(void) { return ui.sel == NTRK - 1u && lp.own; }   /* track 8 is selected and is the looper */
+static int on_t8l(void) { return ui.sel == lp.trk && lp.own; }   /* track 8 is selected and is the looper */
 static void say_t8l(void) { app_say("SELECT T1-7 TO PLAY", ""); }
 
 static void layer_text(char *a, uint32_t n)  /* "LAYER 3" */
@@ -1764,14 +1772,16 @@ static void looper_press(void)
             lp.req = LQ_STOP;
     } else if (lp.state != LP_IDLE || lp.req == LQ_ARM) {
         return;
-    } else if (!seq_play_req) {
-        app_say("Press PLAY first", "");
+    } else if (!seq_play_req && ck_follow) {
+        app_say("REC: THE CLOCK", "MUST RUN FIRST");     /* (the transport is the clock's to start) */
     } else if (lp.fading) {
         app_say("WAIT", "");
     } else if (!lp.has && !looper_fit(pat_frames())) {
         app_say("PATTERN TOO LONG", "TO LOOP");
     } else {
-        lp.own = 1;                          /* (track 8 is the looper's from here: the audio interrupt takes the take) */
+        lp.own = 1;                          /* (its track is the looper's from here: the audio interrupt takes the take) */
+        seq_play_req = 1;                    /* stopped, the FM-1 leading: the pattern starts with the take (bar 1 is here) */
+        lp.armw = 0;
         lp.go = 0;
         lp.req = LQ_ARM;
         ui.rec_take = 1;
@@ -1856,7 +1866,7 @@ static void knob_turn(uint32_t k, int32_t e)
     a[0] = 0;
     if (ui.page == PAGE_EDIT) {              /* the EDIT page: START, REVERSE, LOOP, LENGTH */
         if (on_t8l()) {                      /* the looper's track has no sound to edit */
-            app_say("T8L IS THE LOOP:", "NOTHING TO EDIT");
+            app_say("THE LOOP'S TRACK:", "NOTHING TO EDIT");
             return;
         }
         ui.hot = (int8_t)k;
@@ -1879,7 +1889,7 @@ static void knob_turn(uint32_t k, int32_t e)
             seq_swing = (uint8_t)clamp(seq_swing + e, 50, 75);
         } else if (k == 1u) {
             if (on_t8l())
-                app_say("T8L IS THE LOOP:", "NOTHING TO FIT");
+                app_say("THE LOOP'S TRACK:", "NOTHING TO FIT");
             else
                 t->fit = (uint8_t)clamp(t->fit + e, 0, (int32_t)NFIT - 1);
         } else if (k == 2u) {
@@ -2307,7 +2317,7 @@ static void input(void)
                     ui.page == PAGE_LFO ? "LFO PAGE" : ui.page == PAGE_EDIT ? "EDIT PAGE 1" : ui.page == PAGE_ARP ? "ARP PAGE" :
                     ui.page == PAGE_EDIT2 ? "EDIT PAGE 2" : ui.page == PAGE_GLO ? "GLO PAGE" : "TRACKS PAGE", "");
             if (ui.page == PAGE_EDIT && on_t8l())
-                app_say("T8L IS THE LOOP:", "NOTHING TO EDIT");
+                app_say("THE LOOP'S TRACK:", "NOTHING TO EDIT");
         } else {
             app_say(BTN_NAME[k], "NOT IN THIS VERSION");   /* (never a silent press) */
         }
@@ -2616,9 +2626,13 @@ static void draw_tracks(void)                /* the play page: the eight tracks,
             if (sel)
                 cv_rect(0, y, 240, 19, C_ORANGE);
             trk_text(k, n);
-            if (k == NTRK - 1u && lp.own) {      /* track 8 as the looper: T8L, and what its loop holds */
+            if (k == lp.trk && lp.own) {         /* the looper's track: T8L or T7L, and what its loop holds */
                 char c[8];
-                cv_text(6, y + 2, &FONT_B, "T8L", sel ? C_BLACK : C_ORANGE);
+                c[0] = 'T';
+                c[1] = (char)('1' + k);
+                c[2] = 'L';
+                c[3] = 0;
+                cv_text(6, y + 2, &FONT_B, c, sel ? C_BLACK : C_ORANGE);
                 t[0] = 0;
                 text_cat(t, "LOOP ");
                 if (lp.has) {
@@ -2964,7 +2978,7 @@ static void draw_page4(uint32_t pg)
         text_cat(w[0], seq_swing == 50u ? " STRAIGHT (ALL TRACKS)" : " (ALL TRACKS)");
         if (on_t8l()) {
             w[1][0] = 0;
-            text_cat(w[1], "T8L: NOTHING TO FIT");
+            text_cat(w[1], "LOOP: NOTHING TO FIT");
         } else if (tr->fit) {
             text_cat(w[1], " (THIS TRACK)");
         } else {
@@ -3112,7 +3126,7 @@ static void my_arrived(uint32_t k)
     if (t < NTRK) {
         text_cat(b, "ON T");
     } else {
-        for (t = 6; t < NTRK && (trk[t].sound || (t == NTRK - 1u && lp.own)); t++)
+        for (t = 6; t < NTRK && (trk[t].sound || (t == lp.trk && lp.own)); t++)
             ;                                    /* (track 8 as the looper is not empty to it) */
         if (t < NTRK) {
             trk[t].sound = (uint8_t)li;
@@ -3285,6 +3299,12 @@ void app_frame(void)
     }
     /* track 8 is the looper's while a loop is there, or a take waits or runs; else it is its own track again */
     lp.own = (uint8_t)(lp.has || lp.state != LP_IDLE || lp.fading || lp.req == LQ_ARM);
+    if (!lp.own && !lp.swap)
+        lp.trk = NTRK - 1u;                  /* (no loop: the next first layer is track 8's again) */
+    if (ui.page == PAGE_STEP && on_t8l()) {  /* the loop came onto the track whose steps were shown: it has none to show */
+        ui.page = PAGE_PLAY;
+        ui.redraw = 1;
+    }
     if (lp.done != ui.loop_seen) {           /* a take is in */
         char a[20];
         ui.loop_seen = lp.done;
@@ -3297,8 +3317,9 @@ void app_frame(void)
             text_cat(a, lp.bars == 1u ? " BAR" : " BARS");
             app_say("LOOP FULL:", a);
         } else {
+            /* (where the loop lives from here: it changed places as the take came in) */
             layer_text(a, lp.layers);
-            app_say(a, "IN THE LOOP");
+            app_say(a, (lp.trk == NTRK - 1u) != (lp.swap != 0u) ? "IN: LOOP > T8" : "IN: LOOP > T7");
         }
     }
     {   /* the looper's state changed, or a take moves on: the screen follows */

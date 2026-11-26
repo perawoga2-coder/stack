@@ -63,6 +63,9 @@ static struct {
     volatile uint8_t undo;               /* the other block holds the loop as it was a layer ago */
     volatile uint8_t req;                /* LQ_*: the main loop asks, the audio interrupt does */
     uint8_t hold;                        /* PERFORM still has the second block (perform.c: it lets go within a few ms): the coder waits */
+    volatile uint8_t trk;                /* the track the loop lives on: 7 (T8), or 6 (T7): it changes places each time a take is in (4.04) */
+    volatile uint8_t swap;               /* a take is in: the loop moves to the other track at the next block's start (render_part) */
+    uint8_t armw;                        /* REC went down with the transport just started: blocks it has waited for it to run */
     volatile uint8_t go;                 /* REC was let go in time: the layer on top that waits in the queue is taken */
     volatile uint8_t div;                /* frames of the mix a sample: 2 (22.05 kHz) */
     volatile uint8_t bars;               /* the bars (passes of the pattern) the loop is long */
@@ -103,7 +106,7 @@ static struct {
     uint32_t cb;                         /* fin 2: the record to copy next */
     uint32_t fw, fq, fn;                 /* the queue: where it is written, read, and how many wait */
     lcodec_t rd, we;                     /* the take's coder: the loop that plays read, the other block written */
-} lp = {.div = 2, .bars = 1};
+} lp = {.div = 2, .bars = 1, .trk = 7};
 
 static float rec_in[APP_BLOCK];              /* what is played by hand this block (render_part) */
 
@@ -234,6 +237,7 @@ static void loop_take_in(void)               /* the take is whole: its block pla
     lp.cap = 0;
     lp.fin = 0;
     lp.pl[0].at = ~0u;
+    lp.swap = 1;
     lp.done++;
     lp.ver++;
 }
@@ -330,7 +334,11 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
     uint32_t i, q = lp.req, len, sounding = 0, rs;
     lp.req = LQ_NONE;
     lp.maxf = steer ? (uint32_t)((float)maxb * barf) : maxb * pat;
-    if (q == LQ_ARM && lp.state == LP_IDLE && !lp.fading && playing) {
+    if (q == LQ_ARM && !playing && lp.armw < 40u) {
+        lp.armw++;                               /* (REC started the transport: it runs within a block or two) */
+        lp.req = LQ_ARM;
+    } else if (q == LQ_ARM && lp.state == LP_IDLE && !lp.fading && playing) {
+        lp.armw = 0;
         lp.fw = lp.fq = lp.fn = 0;
         lp.acc = 0.0f;
         lp.accn = 0;

@@ -46,7 +46,7 @@ static int32_t city_group(uint32_t t)
     const uint32_t li = trk[t].sound;
     const sound_t *s;
     const char *n;
-    if (t == NTRK - 1u && lp.own)
+    if (t == lp.trk && lp.own)
         return G_SOUND;
     if (li > NSOUNDS)
         return li < NLIST && my[li - NSOUNDS - 1u].valid ? G_SOUND : -1;
