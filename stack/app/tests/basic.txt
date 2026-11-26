@@ -57,8 +57,8 @@ expect sound 35
 expect pitch 5
 expect level 70
 leds
-# REC with the pattern stopped: no take, no change (Press PLAY first)
-tap REC
+# (up to 4.03 REC was pressed here, stopped, and did nothing; since 4.04 it starts the transport and a take: looper.txt)
+wait 80
 wait 40
 expect sound 35
 expect loop_own 0

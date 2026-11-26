@@ -17,7 +17,7 @@ Messages with other command numbers get no answer.
 | 15 | 0F | INFO | what the three MY slots hold |
 | 20 | 14 | MUTE | the FM-1's own sound off or on (since 0.4.1-test) |
 | 30 | 1E | SONG | a piece of the song as it is now (since 4.0-beta) |
-| 31 | 1F | LOOP INFO | is there a loop on track 8, and its size |
+| 31 | 1F | LOOP INFO | is there a loop (on track 8 or 7), and its size |
 | 32 | 20 | LOOP DATA | a piece of the loop's audio |
 | 112 | 70 | SHOW | is the sample in this slot there |
 | 114 | 72 | HELLO | STACK's name and version |
@@ -192,7 +192,7 @@ The head, 32 bytes:
 | 4 | 1 | the record's version: 1 |
 | 5 | 1 | tracks: 8 |
 | 6 | 1 | bytes a track: 96 |
-| 7 | 1 | flags: bit 0 a loop is on track 8, bit 1 the pattern plays, bit 2 the FM-1 follows a clock |
+| 7 | 1 | flags: bit 0 there is a loop, bit 1 the pattern plays, bit 2 the FM-1 follows a clock, bit 3 the looper is on track 7 (since 4.04-beta; 0: track 8) |
 | 8 | 2 | the record's length in bytes (800) |
 | 10 | 4 | CRC-32 (the usual one, as zlib's) of the bytes from offset 16 to the end |
 | 16 | 1 | tempo, BPM |
@@ -207,7 +207,7 @@ Then eight tracks of 96 bytes, T1 first:
 
 | Offset | Size | What |
 |---|---|---|
-| 0 | 1 | kind: 0 EMPTY, 1 a built-in sound, 2 a sample of the app's (MY 1 to 3), 3 the looper (T8L) |
+| 0 | 1 | kind: 0 EMPTY, 1 a built-in sound, 2 a sample of the app's (MY 1 to 3), 3 the looper (T8L, or T7L since 4.04-beta) |
 | 1 | 1 | category: 0 DRUMS, 1 BASS, 2 KEYS, 3 PAD, 4 LEAD, 5 FX; 255 none |
 | 2 | 1 | the MY slot, 1 to 3 (kind 2) |
 | 3 | 1 | bit 0: a hit (plays through, its own pitch on every key); bit 1: a held sound with a loop |
@@ -218,6 +218,16 @@ Then eight tracks of 96 bytes, T1 first:
 | 56 | 16 | steps 1 to 16: 1 on, 0 off (only the first "steps in the pattern" play) |
 | 72 | 16 | each step's MIDI note (60 is middle C; a hit ignores it) |
 | 88 | 8 | the category as text, zero-padded: `DRUMS`, `BASS`, `KEYS`, `PAD`, `LEAD`, `FX`, `MY`, `LOOP`, or empty |
+
+**Which track holds the loop (since 4.04-beta).** The loop's first layer is track 8's; each time a layer is in, the
+loop moves to the other of tracks 8 and 7 (8, 7, 8, ...). An undo or a cancelled take does not move it; a clear
+ends it, and the next first layer is track 8's again. The track that holds it is the one of kind 3 (`LOOP`); head
+flag bit 3 says the same (1: track 7). Up to 4.03-beta it was always track 8, and bit 3 was 0, so an app that
+reads kind 3 track by track reads both. While a track is kind 3 its own sound sleeps under the loop and is not in
+the record (its steps and the other settings are its own, as SAVE keeps them), except LEVEL (setting 3): that is
+the loop's own level, which goes with the loop from track to track (80 when a loop starts). The other track of the
+two is an ordinary track with its own sound, playing. The record is of the moment piece 0 was asked for: a layer
+that comes in later moves the loop, and changes `<ver>` (LOOP INFO); then ask for the song again.
 
 The 25 settings, in order (signed ones are two's complement):
 
@@ -254,7 +264,7 @@ The 25 settings, in order (signed ones are two's complement):
     ask:     F0 7D 46 4C 1F F7
     answer:  F0 7D 46 4C 1F <has> <rate> <n lo> <n mid> <n hi> <layers> <ver lo> <ver hi> <CRC, 4 bytes packed> F7
 
-- `<has>`: 1 a loop plays on track 8, 0 none (the rest is then 0).
+- `<has>`: 1 a loop plays (on track 8 or 7: the SONG record says which), 0 none (the rest is then 0).
 - `<rate>`: 0 the loop is at 22 050 Hz, 1 at 11 025 Hz. Mono. (Since 4.03-beta it is always 0.)
 - `<n>`: its samples (21 bits). Its length in seconds is n / rate. Up to 4.01-beta it is one pattern long at the
   tempo it was recorded at. **Since 4.02-beta it is a whole number of bars (patterns) long**, one or more: the

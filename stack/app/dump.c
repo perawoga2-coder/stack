@@ -6,7 +6,7 @@
  * page, playing or not. Three messages (docs/PROTOCOL.md), each answered with the same command:
  *   30 SONG  piece        the song as it is NOW (not as SAVE last kept it): DUMP_PIECE bytes of a record made when
  *                         piece 0 is asked for, so all its pieces are of one moment
- *   31 LOOP INFO          is there a loop on track 8, its rate, its samples, its CRC, and a number that changes
+ *   31 LOOP INFO          is there a loop (on track 8 or 7), its rate, its samples, its CRC, and a number that changes
  *                         whenever the loop does
  *   32 LOOP DATA piece    DUMP_PIECE bytes of the loop's samples (16 bits, low byte first), with that number
  * Nothing is written anywhere: a dump only reads. An answer goes out only when the USB queue has room for all of it;
@@ -53,7 +53,8 @@ static void dump_make(void)
     h[4] = DUMP_VER;
     h[5] = (uint8_t)NTRK;
     h[6] = (uint8_t)DUMP_TRK;
-    h[7] = (uint8_t)((lp.has ? 1u : 0u) | (seq_play_req ? 2u : 0u) | (ck_follow ? 4u : 0u));
+    h[7] = (uint8_t)((lp.has ? 1u : 0u) | (seq_play_req ? 2u : 0u) | (ck_follow ? 4u : 0u) |
+                     (lp.own && lp.trk != NTRK - 1u ? 8u : 0u));     /* (bit 3: the loop is on track 7, since 4.04) */
     h[8] = (uint8_t)DUMP_LEN;
     h[9] = (uint8_t)(DUMP_LEN >> 8);
     h[16] = (uint8_t)clamp((int32_t)(44100.0f * 15.0f / (ck_tick_frames() * 6.0f) + 0.5f), 20, 255);
@@ -97,6 +98,8 @@ static void dump_make(void)
 #define F(x, lo, hi) *q++ = (uint8_t)(x);
         SONG_FIELDS(trk[t], F)
 #undef F
+        if (kind == 3u)
+            p[31] = lp.lvl;                  /* (LEVEL: the loop's own) */
         for (i = 0; i < NSTEP; i++) {
             p[56u + i] = step_on[t][i] ? 1u : 0u;
             p[72u + i] = step_note[t][i];

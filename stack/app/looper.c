@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Maker Hip */
-/* STACK: the looper on track 8. Written for STACK. Part of the unity build: included by app.c.
+/* STACK: the looper on track 8 or 7. Written for STACK. Part of the unity build: included by app.c.
+ *
+ * Where it lives (since 4.04): a first layer is track 8's. Each time a take is in (loop_take_in), the loop moves to
+ * the other of tracks 8 and 7 (lp.swap; render_part does it at the next block's start, with the track's bus as it
+ * stands, so it plays on without a gap). The track it leaves has its own sound and steps again; the one it comes to
+ * sleeps under it. A take dropped, an undo, do not move it; a clear (or an undo to nothing) and the next first layer
+ * is track 8's again (app_frame).
  *
  * A loop is a whole number of bars (passes of the pattern) long, so it stays in time with the steps; it need not start
  * on a bar line. It holds what was played by hand (render_part's rec_in: the live voices, before the effects, mono),
@@ -56,16 +62,17 @@ typedef struct {                         /* a block being played: two samples ne
     uint32_t at;                         /* the sample s0 is (~0: none) */
 } lplay_t;
 static struct {
-    volatile uint8_t own;                /* track 8 is the looper's: a loop there, or a take running */
+    volatile uint8_t own;                /* track lp.trk is the looper's: a loop there, or a take running */
     volatile uint8_t has;                /* a loop plays */
     volatile uint8_t state;              /* LP_* */
     volatile uint8_t layers;
     volatile uint8_t undo;               /* the other block holds the loop as it was a layer ago */
     volatile uint8_t req;                /* LQ_*: the main loop asks, the audio interrupt does */
     uint8_t hold;                        /* PERFORM still has the second block (perform.c: it lets go within a few ms): the coder waits */
-    volatile uint8_t trk;                /* the track the loop lives on: 7 (T8), or 6 (T7): it changes places each time a take is in (4.04) */
+    volatile uint8_t trk;                /* the track the loop lives on: 7 (T8) or 6 (T7); it changes places each time a take is in (4.04) */
     volatile uint8_t swap;               /* a take is in: the loop moves to the other track at the next block's start (render_part) */
-    uint8_t armw;                        /* REC went down with the transport just started: blocks it has waited for it to run */
+    uint8_t armw;                        /* REC went down with the transport stopped: blocks it has waited for it to run */
+    uint8_t lvl;                         /* the loop's own LEVEL (it goes with the loop from track to track; 80: as it was played) */
     volatile uint8_t go;                 /* REC was let go in time: the layer on top that waits in the queue is taken */
     volatile uint8_t div;                /* frames of the mix a sample: 2 (22.05 kHz) */
     volatile uint8_t bars;               /* the bars (passes of the pattern) the loop is long */
@@ -106,7 +113,7 @@ static struct {
     uint32_t cb;                         /* fin 2: the record to copy next */
     uint32_t fw, fq, fn;                 /* the queue: where it is written, read, and how many wait */
     lcodec_t rd, we;                     /* the take's coder: the loop that plays read, the other block written */
-} lp = {.div = 2, .bars = 1, .trk = 7};
+} lp = {.div = 2, .bars = 1, .trk = 7, .lvl = 80};
 
 static float rec_in[APP_BLOCK];              /* what is played by hand this block (render_part) */
 

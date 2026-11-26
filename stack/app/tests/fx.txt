@@ -75,8 +75,8 @@ turn K3 -3
 turn K4 20
 wait 30
 expect fxb 0
-# REC (the pattern stopped: no take) changes nothing here
-tap REC
+# (up to 4.03 REC was pressed here, stopped, and did nothing; since 4.04 it starts the transport and a take: looper.txt)
+wait 80
 wait 40
 expect loop_own 0
 expect fxa 1

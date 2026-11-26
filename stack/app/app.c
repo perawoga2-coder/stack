@@ -1025,6 +1025,7 @@ _Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
 static float rb[APP_BLOCK];                  /* a track's voices that a take records (played by hand) */
 static float recf[NTRK][4];                  /* and the track's FILTER on them alone */
 static void seq_start_hook(void) { lp.bar = (uint8_t)(lp.bars - 1u); lp.resync = 1; }
+static uint8_t *lvl_of(uint32_t t) { return t == lp.trk && lp.own ? &lp.lvl : &trk[t].level; }   /* LEVEL: the loop has its own */
 
 /* what a track's envelope is this block (render_part works it out from the track's knobs) */
 typedef struct {
@@ -1076,6 +1077,9 @@ static void voice_render(voice_t *v, float *out, uint32_t n, const env_t *e, flo
     v->att = att;
 }
 
+#ifdef PLAT_HOST
+static uint32_t host_sounded;                /* (the simulator's checks: the tracks whose own voices sounded, a bit each) */
+#endif
 static void render_part(int32_t *lr, uint32_t n, float gain)
 {
     uint32_t t, i, k, on = 0;
@@ -1113,11 +1117,12 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
     }
     perform_begin();
     if (lp.swap) {                           /* a take came in last block: the loop lives on the other of tracks 7 and 8
-                                              * from this block on. Its bus goes with it as it stands (the filters' and
-                                              * the level's state), so nothing steps where the two tracks are set alike */
-        const uint32_t to = lp.trk == NTRK - 1u ? NTRK - 2u : NTRK - 1u;
+                                              * from this block on (4.04). Its bus goes with it as it stands (the filters'
+                                              * and the level's state): no step, no gap; the track it left starts clean */
+        const uint32_t fr = lp.trk, to = fr ^ 1u;    /* (7 and 6: tracks 8 and 7) */
         lp.swap = 0;
-        bus[to] = bus[lp.trk];
+        bus[to] = bus[fr];
+        bus[fr].lp1 = bus[fr].lp2 = bus[fr].hp1 = bus[fr].hp2 = 0.0f;
         lp.trk = (uint8_t)to;
     }
     if (arp.n || arp.on)
@@ -1127,7 +1132,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
     for (t = 0; t < NTRK; t++) {
         const sound_t *s = list_sound(trk[t].sound);
         int32_t f = trk[t].filt;
-        float kd = (float)trk[t].decay, lv = (float)trk[t].level * 0.01f;
+        float kd = (float)trk[t].decay, lv = (float)*lvl_of(t) * 0.01f;    /* (the loop's track: the loop's own) */
         float dcoef = 1.0f, rcoef, a_t = 1.0f, b_t = 0.0f, g_t = lv * lv, a = bus[t].a, b = bus[t].b, g = bus[t].gain;
         float lp1 = bus[t].lp1, lp2 = bus[t].lp2, hp1 = bus[t].hp1, hp2 = bus[t].hp2;
         float fa[2], rate_t = 1.0f, dry = 1.0f;
@@ -1207,16 +1212,24 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         }
         for (i = 0; i < n; i++)
             tb[i] = 0.0f;
-        if (loop8) {                             /* track 8 as the looper: the loop is its sound (no voices) */
+        if (loop8) {                             /* the looper's track (8 or 7): the loop is its sound (no voices) */
             {   /* the loop holds to the bar by its own count while the FM-1 leads at 120 and the loop is a pattern of
                  * that long; else (a clock in, or a tempo taken from one) it is steered to the bar: looper.c */
                 const uint32_t pat = pat_frames();
                 const int steer = ck_follow || seq_sf != SEQ_SF_120 || (lp.total && lp.total != pat * lp.bars);
                 any = loop_block(tb, n, seq_bar_off, seq_running, pat,
                                  seq_dphase > 0.0f ? (1.0f - seq_phase) / seq_dphase : (float)pat, steer ? seq_phase : -1.0f, seq_dphase);
-                for (k = 0; k < NVOICE; k++)         /* (track 8's own sound sleeps under the loop: its voices end) */
-                    if (voice[k].state != V_OFF && voice[k].track == t)
-                        voice[k].state = V_OFF;
+                for (k = 0; k < NVOICE; k++)         /* (the track's own sound sleeps under the loop: a note that
+                                                      * sounded as the loop came fades in ~8 ms, a new one never starts) */
+                    if (voice[k].state != V_OFF && voice[k].track == t) {
+                        env_t fe = ev;
+                        voice[k].state = voice[k].att > 0.0f ? V_REL : V_OFF;
+                        fe.rcoef = fe.rhit = 0.98f;
+                        if (voice[k].state) {
+                            voice_render(&voice[k], tb, n, &fe, 1.0f);
+                            any = 1;
+                        }
+                    }
             }
             g_t *= 1.0f / 0.64f;                 /* (LEVEL at its 80: the loop as it was played) */
             if (pf_rate * 12.0f < 1.0f)          /* (PERFORM's TAPE STOP: the loop is no tape, it fades as it stops) */
@@ -1249,6 +1262,9 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
                     }
                     any = 1;
                     on++;
+#ifdef PLAT_HOST
+                    host_sounded |= 1u << t;
+#endif
                 }
         }
         if (!anyr)
@@ -1750,8 +1766,8 @@ static void speak(void)                      /* a screen reader that asks hears 
 /* PRESETS: the selected track's sound, one place along the list; the list stops at its ends. Only the sound changes:
  * the knobs' values, the steps and the other tracks stay. The screen says the old and the new */
 /* ------------------------------------------------------------------ the looper's side of the panel --- */
-static int on_t8l(void) { return ui.sel == lp.trk && lp.own; }   /* track 8 is selected and is the looper */
-static void say_t8l(void) { app_say("SELECT T1-7 TO PLAY", ""); }
+static int on_t8l(void) { return ui.sel == lp.trk && lp.own; }   /* the looper's track (T8L or T7L) is selected */
+static void say_t8l(void) { app_say("THE LOOP'S TRACK:", "SELECT ANOTHER"); }
 
 static void layer_text(char *a, uint32_t n)  /* "LAYER 3" */
 {
@@ -1762,9 +1778,10 @@ static void layer_text(char *a, uint32_t n)  /* "LAYER 3" */
     text_cat(a, c);
 }
 
-/* REC goes down: a layer is recorded from this moment (the transport must run), or the one recording ends: a first
- * layer at the nearest whole number of bars, one on top where it is. Nothing is said: the top of the screen shows the
- * take at once. The loop lives on track 8: while there is one, track 8 is T8L */
+/* REC goes down: a layer is recorded from this moment, or the one recording ends: a first layer at the nearest whole
+ * number of bars, one on top where it is. Stopped, the FM-1 leading, the press starts the transport too (4.04);
+ * following a clock it is the clock's to start. Nothing is said: the top of the screen shows the take at once. The
+ * loop lives on track 8 or 7 (looper.c): that track is T8L or T7L */
 static void looper_press(void)
 {
     if (lp.state == LP_REC) {
@@ -1779,6 +1796,8 @@ static void looper_press(void)
     } else if (!lp.has && !looper_fit(pat_frames())) {
         app_say("PATTERN TOO LONG", "TO LOOP");
     } else {
+        if (!lp.has)
+            lp.lvl = 80;                     /* (a new loop: at the level it is played at) */
         lp.own = 1;                          /* (its track is the looper's from here: the audio interrupt takes the take) */
         seq_play_req = 1;                    /* stopped, the FM-1 leading: the pattern starts with the take (bar 1 is here) */
         lp.armw = 0;
@@ -1807,7 +1826,7 @@ static void looper_undo(void)                /* REC held 3 to 5 s: the take unde
     }
 }
 
-static void looper_clear(void)               /* REC held 5 s: the whole loop goes, and track 8 is its own track again */
+static void looper_clear(void)               /* REC held 5 s: the whole loop goes; tracks 7 and 8 are their own again */
 {
     if (lp.has || lp.state != LP_IDLE || lp.req == LQ_ARM) {
         lp.req = LQ_CLEAR;
@@ -2031,7 +2050,8 @@ static void knob_turn(uint32_t k, int32_t e)
     } else if (k == 2u) {
         t->decay = (uint8_t)clamp(t->decay + e, 0, 100);
     } else {
-        t->level = (uint8_t)clamp(t->level + e, 0, 100);
+        uint8_t *l = lvl_of(ui.sel);         /* (the loop's track: the loop's own level) */
+        *l = (uint8_t)clamp(*l + e, 0, 100);
     }
     ui.redraw = 1;
 }
@@ -2644,7 +2664,7 @@ static void draw_tracks(void)                /* the play page: the eight tracks,
                 }
                 cv_text(40, y + 2, sel ? &FONT_B : &FONT_S, t, sel ? C_BLACK : lp.has ? C_WHITE : C_DIM);
                 if (lp.has) {
-                    int32_t w = (int32_t)trk[k].level * 30 / 100;
+                    int32_t w = (int32_t)lp.lvl * 30 / 100;
                     cv_rect(204, y + 8, 30, 3, sel ? C_BLACK : C_LINE);
                     cv_rect(204, y + 8, w, 3, sel ? C_WHITE : C_AMB);
                 }
@@ -2788,7 +2808,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
         } else if (k == 1u) {
             filt_text(t->filt, v);
         } else {
-            int_text(k == 2u ? t->decay : t->level, v);
+            int_text(k == 2u ? t->decay : *lvl_of(ui.sel), v);
         }
         cv_text(x, 3, &FONT_XS, NAME[k], C_GRAY);
         cv_text(x, 16, &FONT_B, v, hot ? C_WHITE : C_HI);
@@ -3297,7 +3317,7 @@ void app_frame(void)
         ui.hot = -1;
         ui.redraw = 1;
     }
-    /* track 8 is the looper's while a loop is there, or a take waits or runs; else it is its own track again */
+    /* track lp.trk is the looper's while a loop is there, or a take waits or runs; else it is its own track again */
     lp.own = (uint8_t)(lp.has || lp.state != LP_IDLE || lp.fading || lp.req == LQ_ARM);
     if (!lp.own && !lp.swap)
         lp.trk = NTRK - 1u;                  /* (no loop: the next first layer is track 8's again) */
@@ -3305,27 +3325,30 @@ void app_frame(void)
         ui.page = PAGE_PLAY;
         ui.redraw = 1;
     }
-    if (lp.done != ui.loop_seen) {           /* a take is in */
-        char a[20];
+    if (lp.done != ui.loop_seen && !lp.swap) {   /* a take is in, and the loop has moved (a block after) */
+        char a[24], n[8];
         ui.loop_seen = lp.done;
+        a[0] = 0;
         if (lp.full) {                       /* a first layer that ended by itself */
-            char n[8];
             lp.full = 0;
-            a[0] = 0;
             int_text(lp.bars, n);
+            text_cat(a, "LOOP FULL: ");
             text_cat(a, n);
             text_cat(a, lp.bars == 1u ? " BAR" : " BARS");
-            app_say("LOOP FULL:", a);
         } else {
-            /* (where the loop lives from here: it changed places as the take came in) */
             layer_text(a, lp.layers);
-            app_say(a, (lp.trk == NTRK - 1u) != (lp.swap != 0u) ? "IN: LOOP > T8" : "IN: LOOP > T7");
+            text_cat(a, " IN");
+        }
+        {
+            char m[] = "LOOP -> T8";         /* (where it lives from here) */
+            m[9] = (char)('1' + lp.trk);
+            app_say(a, m);
         }
     }
     {   /* the looper's state changed, or a take moves on: the screen follows */
         uint32_t st = lp.own | lp.has << 1 | lp.state << 2 | lp.undo << 4 | (uint32_t)lp.layers << 5 |
                       (lp.state != LP_IDLE ? (lp.tk / 2205u & 0xFFu) << 13 : 0u) |      /* (its bar: 20 times a second) */
-                      (lp.first && lp.stop ? (now >> 7 & 1u) << 21 | 1u << 22 : 0u);
+                      (lp.first && lp.stop ? (now >> 7 & 1u) << 21 | 1u << 22 : 0u) | (uint32_t)(lp.trk & 1u) << 23;
         if (st != ui.loop_drawn) {
             ui.loop_drawn = st;
             ui.redraw = 1;
@@ -3370,8 +3393,8 @@ int app_expect(const char *what, int *got)
         *got = trk[ui.sel].filt;
     else if (!strcmp(what, "decay"))
         *got = trk[ui.sel].decay;
-    else if (!strcmp(what, "level"))
-        *got = trk[ui.sel].level;
+    else if (!strcmp(what, "level"))         /* (the loop's track: the loop's) */
+        *got = *lvl_of(ui.sel);
     else if (!strcmp(what, "page"))
         *got = ui.page;
     else if (!strcmp(what, "playing"))
@@ -3448,8 +3471,16 @@ int app_expect(const char *what, int *got)
         *got = rx.on;
     else if (!strncmp(what, "trk", 3) && what[3] >= '1' && what[3] <= '8')  /* trkN: track N's place in the list */
         *got = trk[what[3] - '1'].sound;
-    else if (!strcmp(what, "loop_own"))      /* the looper: track 8 is its, a loop there, its layers, */
+    else if (!strcmp(what, "loop_own"))      /* the looper: its track is its, a loop there, its layers, */
         *got = lp.own;
+    else if (!strcmp(what, "loop_trk"))      /* the track it lives on (or the next first layer will): 8 or 7 */
+        *got = lp.trk + 1;
+    else if (!strcmp(what, "loop_off"))      /* frames into the loop where its first bar begins */
+        *got = (int)lp.off;
+    else if (!strncmp(what, "sounded", 7)) { /* soundedN: track N's own voices sounded since the last look */
+        *got = (int)(host_sounded >> ((what[7] - '1') & 7) & 1u);
+        host_sounded &= ~(1u << ((what[7] - '1') & 7));
+    }
     else if (!strcmp(what, "loop_has"))
         *got = lp.has;
     else if (!strcmp(what, "loop_layers"))

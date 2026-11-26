@@ -1,4 +1,5 @@
-# STACK in the host simulator: the looper on REC (4.03: a take starts the moment REC goes down), and SELECT as the tempo.
+# STACK in the host simulator: the looper on REC (4.03: a take starts the moment REC goes down; 4.04: REC starts the
+# transport too, and the loop moves between tracks 8 and 7 each time a take is in), and SELECT as the tempo.
 #   app/build/host/stack_host app/tests/looper.txt app/build/host
 master 4096
 wait 2200
@@ -16,13 +17,9 @@ wait 60
 expect octave 0
 expect loop_own 0
 expect loop_state 0
-# --- REC with the pattern stopped: nothing (Press PLAY first)
-tap REC
-wait 60
-expect loop_state 0
-expect loop_own 0
-shot looper_press_play.png
-# track 8 gets a sound of its own (the fifth of the list) and a step: it sleeps under a loop and comes back after
+expect loop_trk 8
+# tracks 8 and 7 get sounds of their own (the fifth of the list) and a step each: each sleeps under the loop while
+# it is there, and sounds again when it has moved on
 turn ALGO 7
 wait 60
 expect track 8
@@ -38,10 +35,154 @@ wait 40
 expect step3 60
 tap SEQ
 wait 40
-turn ALGO -3
+turn ALGO -1
+wait 60
+expect track 7
+turn PRESET 5
+wait 60
+expect trk7 5
+tap SEQ
+wait 40
+key w6 down 100
+wait 20
+key w6 up
+wait 40
+expect step7 60
+tap SEQ
+wait 40
+turn ALGO -2
 wait 60
 expect track 5
 expect sound 33
+# --- REC with the transport stopped (the FM-1 leads): the take starts at the press, and the transport with it
+# (bar 1 is the press, Start goes out); the first layer is track 8's
+expect sounded7 >-1
+expect sounded8 >-1
+wav looper_rec_stopped.wav
+press REC
+wait 30
+expect playing 1
+expect clk_starts 1
+expect loop_state 2
+expect loop_own 1
+expect loop_trk 8
+shot looper_rec_stopped.png
+release REC
+key 7 down 100
+wait 300
+key 7 up
+wait 900
+tap REC
+wait 800
+expect loop_state 0
+expect loop_layers 1
+expect loop_bars 1
+expect loop_total 88200
+expect loop_off 0
+# the take is in: the loop moved to track 7 (T7L) at once, the screen says LOOP -> T7. Track 8 slept under the take
+# and has its sound and step again; track 7's sleep now (it sounded in bar 1)
+expect loop_trk 7
+expect sounded8 0
+expect sounded7 1
+shot looper_moved_t7.png
+expect trk8 5
+expect trk7 5
+expect track 5
+wait 2000
+expect sounded8 1
+expect sounded7 0
+# a layer on top: once round; in, and the loop is on track 8 again; track 7 sounds again, track 8 sleeps
+tap REC
+wait 30
+expect loop_state 2
+key 9 down 100
+wait 300
+key 9 up
+wait 1900
+expect loop_state 0
+expect loop_layers 2
+expect loop_trk 8
+expect sounded7 >-1
+expect sounded8 >-1
+wait 2000
+expect sounded7 1
+expect sounded8 0
+shot looper_moved_t8.png
+# a take cancelled (REC held past half a second) and an undo do not move it
+press REC
+wait 1500
+release REC
+wait 60
+expect loop_layers 2
+expect loop_trk 8
+press REC
+wait 3500
+release REC
+wait 200
+expect loop_layers 1
+expect loop_has 1
+expect loop_trk 8
+expect sounded7 >-1
+expect sounded8 >-1
+wait 2000
+expect sounded7 1
+expect sounded8 0
+# a clear: both tracks are their own again; the next first layer is track 8's
+press REC
+wait 5200
+release REC
+wait 200
+expect loop_has 0
+expect loop_own 0
+expect loop_trk 8
+expect trk7 5
+expect trk8 5
+expect sounded7 >-1
+expect sounded8 >-1
+wait 2000
+expect sounded7 1
+expect sounded8 1
+wavstop
+tap REC
+wait 100
+expect loop_state 2
+expect loop_trk 8
+press REC
+wait 3300
+release REC
+wait 100
+expect loop_state 0
+expect loop_own 0
+# (the steps of 7 and 8 off again, the transport stopped: the rest is heard as the loop alone)
+tap PLAY
+wait 200
+expect playing 0
+turn ALGO 2
+wait 60
+expect track 7
+tap SEQ
+wait 40
+key w6 down 100
+wait 20
+key w6 up
+wait 40
+expect step7 0
+tap SEQ
+wait 40
+turn ALGO 1
+wait 60
+tap SEQ
+wait 40
+key w2 down 100
+wait 20
+key w2 up
+wait 40
+expect step3 0
+tap SEQ
+wait 40
+turn ALGO -3
+wait 60
+expect track 5
 # --- REC goes down while it plays (700 ms into a bar): it records from that moment, REC lit, the screen says so
 wav looper_three_layers.wav
 tap PLAY
@@ -80,11 +221,13 @@ expect voices 0
 peakreset
 wait 1000
 expect peak_db_min -40
-# --- while a loop is there track 8 is T8L: its keys are silent, PRESETS and SEQ do nothing, its own sound sleeps
-turn ALGO 3
+# --- the take in, the loop moved to track 7: T7L. Its keys are silent, PRESETS and SEQ do nothing, its own sound
+# sleeps. LEVEL there is the loop's own: track 7's and track 8's stay theirs
+expect loop_trk 7
+turn ALGO 2
 wait 60
-expect track 8
-shot looper_t8l.png
+expect track 7
+shot looper_t7l.png
 key 7 down 100
 wait 60
 expect voices 0
@@ -92,11 +235,24 @@ key 7 up
 wait 20
 turn PRESET 3
 wait 60
-expect trk8 5
+expect trk7 5
 tap SEQ
 wait 60
 expect page 0
-turn ALGO -3
+expect level 80
+turn K4 -10
+wait 60
+expect level 70
+turn ALGO 1
+wait 60
+expect track 8
+expect level 80
+turn ALGO -1
+wait 60
+turn K4 10
+wait 60
+expect level 80
+turn ALGO -2
 wait 60
 expect track 5
 # --- a layer on top: from the moment REC goes down (it waits in the queue while REC is down: state 1; taken when it
@@ -118,7 +274,8 @@ wait 200
 expect loop_state 0
 expect loop_layers 2
 expect loop_undo 1
-# a third, ended by REC before it is once round: it is in at once (the rest of the loop is as it was)
+expect loop_trk 8
+# a third, ended by REC before it is once round: it is in at once (the rest of the loop is as it was), on track 7
 wait 500
 tap REC
 wait 100
@@ -130,6 +287,7 @@ tap REC
 wait 150
 expect loop_state 0
 expect loop_layers 3
+expect loop_trk 7
 shot looper_three_layers.png
 wait 4200
 wavstop
@@ -158,6 +316,7 @@ wait 200
 expect loop_layers 2
 expect loop_undo 0
 expect loop_has 1
+expect loop_trk 7
 # again: only one layer can be undone
 press REC
 wait 3500
@@ -167,7 +326,8 @@ expect loop_layers 2
 shot looper_only_one_undo.png
 wait 1500
 wavstop
-# the press that ends a take, held on and let go between 3 and 5 s: the layer just made goes again
+# the press that ends a take, held on and let go between 3 and 5 s: the layer just made goes again (it moved to
+# track 8 as it came in; the undo leaves it there)
 tap REC
 wait 500
 expect loop_state 2
@@ -175,13 +335,15 @@ press REC
 wait 200
 expect loop_state 0
 expect loop_layers 3
+expect loop_trk 8
 wait 3300
 release REC
 wait 200
 expect loop_state 0
 expect loop_layers 2
 expect loop_has 1
-# --- held 5 s: the whole loop goes, there and then; letting go does nothing more; track 8 is its own again
+expect loop_trk 8
+# --- held 5 s: the whole loop goes, there and then; letting go does nothing more; tracks 7 and 8 are their own
 wav looper_clear.wav
 press REC
 wait 4900
@@ -195,6 +357,7 @@ expect loop_has 0
 expect loop_layers 0
 expect loop_own 0
 expect trk8 5
+expect trk7 5
 wavstop
 turn ALGO 3
 wait 60
@@ -489,6 +652,19 @@ clock 10 20
 expect clk_bpm10 >1240
 expect clk_bpm10 <1260
 shot looper_tempo_clock_in.png
+# REC with the transport stopped while a clock comes in: nothing (the transport is the clock's to start); the screen
+# says the clock must run
+tap PLAY
+clock 10 20
+expect playing 0
+press REC
+clock 1 20
+release REC
+clock 10 20
+expect loop_state 0
+expect loop_layers 1
+expect playing 0
+shot looper_clock_must_run.png
 # --- nothing saved: a restart, and the loop is gone; the flash was never written
 wait 700
 expect store_writes 0

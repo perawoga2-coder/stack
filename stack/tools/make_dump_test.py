@@ -117,12 +117,13 @@ many("expect store_writes 0",
      "# --- the loop: none yet",
      "sysex_out", "sysex " + frame(31, []), "wait 4", "expect_sysex " + frame(31, [0, 0, 0, 0, 0, 0, 0, 0] + pack7([0, 0, 0, 0])),
      "sysex_out", "sysex " + frame(32, [0, 0]), "wait 4", "expect_sysex " + frame(32, [0, 0, 0, 0]),
-     "# a loop on track 8: 3/4 at 100 is 1.8 s, 39 690 samples at 22 kHz; the organ held across it",
+     "# a loop (its first layer is track 8's): 3/4 at 100 is 1.8 s, 39 690 samples at 22 kHz; the organ held across it",
      "tap PLAY", "wait 100", "tap REC", "wait 300", "key w4 down 100", "wait 1000", "tap REC", "wait 700", "key w4 up", "wait 1900",
      "expect loop_layers 1", "expect loop_total 79380", "expect loop_ver 1",
-     "# the song says so: track 8 is the LOOP, one layer (and it plays)")
-T[7] = track(kind="LOOP")
-ask_song(song(T, bpm=100, sig=1, steps=12, swing=60, sel=4, layers=1, flags=3))
+     "# the song says so: the take in, the loop moved to track 7 (since 4.04): track 7 is the LOOP (flags bit 3),",
+     "# track 8 its own again; one layer (and it plays)")
+T[6] = track(kind="LOOP")
+ask_song(song(T, bpm=100, sig=1, steps=12, swing=60, sel=4, layers=1, flags=1 | 2 | 8))
 n = 39690 * 2
 pieces = (n + PIECE - 1) // PIECE
 many("# its pieces, all of them, while the pattern plays on: what went out is the loop (its CRC), nothing waited,",
@@ -139,6 +140,10 @@ many("wavstop", f"expect dump_pieces {pieces}", "expect dump_loop_ok 1", "expect
      "tap REC", "wait 1900", "key w8 down 100", "wait 600", "key w8 up", "wait 2200", "expect loop_layers 2",
      "expect loop_ver 2", "sysex " + frame(32, [0, 0]), "wait 4", "sysex " + frame(32, [1, 0]), "wait 4",
      "expect dump_pieces 2", "expect dump_loop_ok 0",
+     "# and it moved back to track 8: the song says so")
+T[6], T[7] = track(), track(kind="LOOP")
+ask_song(song(T, bpm=100, sig=1, steps=12, swing=60, sel=4, layers=2, flags=1 | 2))
+many(
      "# --- the computer stops reading: the answers that do not fit wait their turn, and STACK does not (the pattern",
      "# plays on, the screen works); reading again, they go",
      "expect dump_waits 0", "usb stall",

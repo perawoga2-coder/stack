@@ -253,3 +253,78 @@ wait 2300
 release SAVE
 wait 100
 expect sound 33
+# --- SAVE after the loop has moved to track 7 (4.04): the loop is never kept; tracks 7 and 8 come back with their
+# own sounds, levels and steps (the loop's own LEVEL is not track 7's)
+turn ALGO 2
+wait 40
+expect track 7
+turn PRESET 5
+wait 60
+tap SEQ
+wait 40
+key w6 down 100
+wait 20
+key w6 up
+wait 40
+tap SEQ
+wait 40
+turn ALGO 1
+wait 40
+expect track 8
+turn PRESET 5
+turn K4 -20
+wait 60
+tap SEQ
+wait 40
+key w2 down 100
+wait 20
+key w2 up
+wait 40
+tap SEQ
+wait 40
+turn ALGO -3
+wait 40
+tap REC
+wait 100
+expect playing 1
+key 7 down 100
+wait 300
+key 7 up
+wait 800
+tap REC
+wait 900
+expect loop_layers 1
+expect loop_trk 7
+turn ALGO 2
+wait 40
+expect level 80
+turn K4 -30
+wait 40
+expect level 50
+tap PLAY
+wait 200
+tap SAVE
+wait 100
+expect store_writes >0
+reboot
+wait 2200
+expect loop_has 0
+expect loop_own 0
+expect trk7 5
+expect trk8 5
+turn ALGO -8
+wait 40
+turn ALGO 6
+wait 40
+expect track 7
+expect level 80
+expect step7 60
+turn ALGO 1
+wait 40
+expect level 60
+expect step3 60
+# cleared again
+press SAVE
+wait 2300
+release SAVE
+wait 100

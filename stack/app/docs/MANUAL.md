@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.03-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.04-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -9,14 +9,14 @@ STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for v
 - **This is a beta.** Not everything is finished. Some things may go wrong. Please tell us what you find.
 - **Do not hold REC when you switch the FM-1 on.** Do not hold OCT− and OCT+ together when you switch it on.
   Those key holds belong to the FM-1's start-up and update system, not to STACK.
-- **The loop on track 8 is gone when you switch off.** It is never saved. To keep it, record it into Burger Studio.
+- **The loop is gone when you switch off.** It is never saved. To keep it, record it into Burger Studio.
 - **Samples sent from Burger Studio may be gone after you switch off.** Send them again if a track shows EMPTY.
 - **Your song is saved only when you press SAVE.** STACK never saves by itself.
 
 ## The idea
 
 STACK has eight tracks. Each track plays one sound. You pick a track, pick its sound, and play it with the keys.
-A 16-step sequencer plays the tracks for you. Track 8 can become a looper that records what you play: press REC.
+A 16-step sequencer plays the tracks for you. Press REC and the looper records what you play, on track 8 or 7.
 
 ## The play page
 
@@ -187,20 +187,20 @@ Hold a chord and it runs. Let go and it stops. It runs in time with the sequence
 
 ![The looper records a layer](img/looper.png)
 
-Track 8 can be a looper. It records what you play and plays it back in a loop, in time with the sequencer.
-The REC button does everything, on every page except GLO. **Recording starts the moment you press REC.** Nothing
-waits for a bar.
+The looper records what you play and plays it back in a loop, in time with the sequencer. It lives on track 8 or
+track 7. The REC button does everything, on every page except GLO. **Recording starts the moment you press REC.**
+Nothing waits for a bar, and you do not have to press PLAY first.
 
-1. Press PLAY. The looper only records while the sequencer runs.
-2. Select a track from T1 to T7.
-3. Press REC and play. The REC light is on and the top of the screen says `RECORDING LAYER 1`. A bar on the screen
-   runs down: it shows how much recording time is left, with the seconds.
-4. Press REC again when you are done. The looper makes the loop a whole number of bars long, the number nearest
+1. Select a track to play, for example T1.
+2. Press REC and play. If the sequencer is stopped, REC starts it too: bar 1 starts at your press. The REC light
+   is on and the top of the screen says `RECORDING LAYER 1`. A bar on the screen runs down: it shows how much
+   recording time is left, with the seconds.
+3. Press REC again when you are done. The looper makes the loop a whole number of bars long, the number nearest
    to what you played. So the loop stays in time.
    - If that is a little longer than you played, it records on to the end (the REC light blinks, the screen says
      `RECORDING ON TO 2 BARS`) and then plays.
    - If it is a little shorter, the loop is cut there and plays at once.
-5. To add a layer, press REC again and play. It records from that moment, on top of the loop. It stops by itself
+4. To add a layer, press REC again and play. It records from that moment, on top of the loop. It stops by itself
    after one round of the loop, or when you press REC again. The bar on the screen shows how much of the round is
    left.
 
@@ -223,14 +223,25 @@ happen when you let go.
 - **The sound of the loop.** To hold 8 seconds, the loop is stored compressed. You can hear a little noise with
   the sound, most on bright sounds and cymbals. Bass and soft sounds stay clean.
 - Only what you play by hand is recorded. The sequencer's own steps are not recorded.
-- While a loop exists, track 8 shows T8L and plays the loop. Track 8's own sound and steps are silent then. They
-  come back when you clear the loop.
-- On T8L the keys are silent. Select T1 to T7 to play. The knobs, FX and MUTE of track 8 work on the loop.
+- **The loop moves between track 8 and track 7.** The first layer goes to track 8: it shows T8L. Each time a layer
+  is in the loop, the loop moves to the other track: 8, then 7, then 8 again, and so on. The screen says
+  `LOOP -> T7` (or `LOOP -> T8`). The music does not stop and there is no gap. Your selected track stays selected.
+- The track that holds the loop plays the loop. Its own sound and steps are silent then. The track the loop leaves
+  plays its own sound and steps again at once. So you can give track 7 and track 8 their own parts: one of them
+  plays while the loop is on the other.
+- A layer you cancel, or an undo, does not move the loop. When you clear the loop, tracks 7 and 8 both play their
+  own sounds again, and the next first layer goes to track 8.
+- If the selected track is the one that holds the loop (T8L or T7L), the keys are silent and the screen says
+  `SELECT ANOTHER`. Select another track to play.
+- The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
+  at 80, as loud as you played it. The FILTER, FX and LFO of the track that holds the loop work on the loop.
 - A layer on top is only kept when you let go of REC within half a second. If you hold REC longer, that layer is
   dropped and the loop stays as it was. So holding REC to remove a layer never records anything.
 - If you hold the REC press that ends a layer for 3 seconds, the layer you just made is removed again.
 - Starting a new layer means the layer before it can no longer be removed.
 - If you stop the sequencer while a layer records, that layer is dropped.
+- When the FM-1 follows a clock (`CLOCK: BURGER` or `CLOCK: BT`), the clock starts the sequencer. REC while it is
+  stopped records nothing; the screen says `REC: THE CLOCK MUST RUN FIRST`.
 - The loop is gone when you switch off.
 - If you change the tempo or the time signature, the loop no longer fits. The screen says `LOOP OUT OF TIME`.
   Clear the loop and record it again.
@@ -266,7 +277,7 @@ effect on everything you hear, on all tracks at once. Hold the key: the effect i
 - Keys 1 to 5 share one memory. Only one of them plays: the last one you pressed.
 - REPEAT and REVERSE start on the next step while the sequencer plays.
 - The effects follow the tempo.
-- TAPE STOP and OCT DOWN change the notes of the tracks. The loop on track 8 keeps its pitch.
+- TAPE STOP and OCT DOWN change the notes of the tracks. The loop keeps its pitch.
 
 **PERFORM and the looper.** Keys 1 to 5 borrow memory from the looper.
 
@@ -314,7 +325,7 @@ after half a second, at the same tempo.
 Burger Studio is Maker Hip's app. It sends samples to the FM-1 over the USB cable.
 
 - A sample lands in MY 1, MY 2 or MY 3, at the end of the sound list.
-- If track 7 or 8 is empty, the new sample goes there, and the screen tells you.
+- If track 7 or 8 is empty (and does not hold the loop), the new sample goes there, and the screen tells you.
 - A slot that could not be read shows a note in the list, such as `(EMPTY)` or `(BAD …)`.
 - When the FM-1's screen shows `SOUND IN BURGER`, the app has muted the FM-1's own speaker and plays the FM-1's
   sound itself.
@@ -322,7 +333,7 @@ Burger Studio is Maker Hip's app. It sends samples to the FM-1 over the USB cabl
 ## VACUUM: the whole song into Burger Studio
 
 Burger Studio can pull your whole STACK song off the FM-1: all eight tracks with their sounds, knobs and steps, the
-tempo, the time signature, the swing, and the loop on track 8.
+tempo, the time signature, the swing, and the loop (and which track holds it, 7 or 8).
 
 - Connect the FM-1 with the USB cable and press VACUUM FM-1 in the app.
 - You do nothing on the FM-1. It works on any page, playing or stopped.
@@ -339,7 +350,8 @@ Press SAVE to save your song. The screen says `SAVED`.
 What is saved: every track's sound and knobs, FX, ENV, LFO, EDIT, ARP, the steps and their notes, the tempo, the
 time signature, the swing, and Bluetooth on or off.
 
-What is **not** saved: the loop on track 8, and the samples themselves.
+What is **not** saved: the loop, and the samples themselves. Tracks 7 and 8 are saved with their own sounds,
+knobs and steps, also while the loop is on one of them.
 
 - **Stop first.** While the sequencer plays, the screen says `STOP TO SAVE`. Saving stops the sound for a moment.
 - The song loads by itself when you switch on.
