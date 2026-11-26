@@ -1150,7 +1150,7 @@ static uint32_t host_eq_runs;                /* (and the EQ's bands run, a block
 static void render_part(int32_t *lr, uint32_t n, float gain)
 {
     uint32_t t, i, k, on = 0;
-    uint32_t r = evq_r, take = lp.state != LP_IDLE || lp.req == LQ_ARM;   /* a take is armed or runs */
+    uint32_t r = evq_r, take = lp.state != LP_IDLE || lp.req == LQ_ARM || lp.cap;   /* a take is armed or runs (or its tail, 4.14) */
     if (my_kill) {                           /* a slot of the app's is about to be erased: its voices end here */
         for (k = 0; k < NVOICE; k++)
             if (voice[k].my && (my_kill >> (voice[k].my - 1u) & 1u))
@@ -1291,10 +1291,17 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
                                                       * sounded as the loop came fades in ~8 ms, a new one never starts) */
                     if (voice[k].state != V_OFF && voice[k].track == t) {
                         env_t fe = ev;
+                        /* (a take's tail hears it fade, as it is heard; over ~30 ms, not 1: the seam's click, 4.14) */
+                        const uint32_t mine = take && (!voice[k].seq || (ui_step_isr && t == ui_sel_isr));
                         voice[k].state = voice[k].att > 0.0f ? V_REL : V_OFF;
-                        fe.rcoef = fe.rhit = 0.98f;
+                        fe.rcoef = fe.rhit = 0.9992f;
                         if (voice[k].state) {
-                            voice_render(&voice[k], tb, n, &fe, 1.0f);
+                            if (mine && !anyr) {
+                                for (i = 0; i < n; i++)
+                                    rb[i] = 0.0f;
+                                anyr = 1;
+                            }
+                            voice_render(&voice[k], mine ? rb : tb, n, &fe, 1.0f);
                             any = 1;
                         }
                     }
@@ -3329,6 +3336,66 @@ static void draw_title(void)                 /* in the tracks' place; the keys, 
     cv_blit(0, 108);
 }
 
+/* 4.14: a take on the play page: big and plain. REC and the layer, the seconds left, and the graph of what is being
+ * recorded: its loudness as it comes in, along the take's way (a first layer: the memory, or its last bar once REC
+ * was pressed again; a layer on top: one pass), the part gone filled, a line at each bar */
+#define RW 220u
+static uint8_t rec_w[RW];                    /* the graph: a column's height, 0 .. 30 */
+static uint32_t rec_x;                       /* the column it had come to (those between are filled too) */
+static void draw_rec(void)
+{
+    const uint32_t of = lp.first ? (lp.stop ? lp.want : lp.maxf) : lp.total, tk = lp.tk, bf = pat_frames();
+    const uint32_t gw = lp.first ? lp.maxf : lp.total;          /* (the graph's whole width: it keeps its scale) */
+    const uint32_t x = gw ? (tk < gw ? (uint32_t)((uint64_t)tk * RW / gw) : RW - 1u) : 0u;
+    char t[12], c[8];
+    uint32_t i, h;
+    float pk = lp.pk;
+    lp.pk = 0.0f;
+    if (lp.state == LP_IDLE || tk < 2205u || x < rec_x) {    /* a new take: a clean graph */
+        for (i = 0; i < RW; i++)
+            rec_w[i] = 0;
+        rec_x = x;
+    }
+    h = (uint32_t)(pk * 60.0f);
+    h = h > 30u ? 30u : h;
+    for (i = rec_x; i <= x && i < RW; i++)
+        if (h > rec_w[i])
+            rec_w[i] = (uint8_t)h;
+    rec_x = x;
+    cv_begin(240, 80, C_BLACK);                  /* REC, the layer, the seconds left */
+    cv_rect(10, 14, 16, 16, (plat_ms() >> 8 & 1u) ? RGB(255, 40, 40) : RGB(120, 20, 20));
+    cv_text(34, 6, &FONT_L, "REC", RGB(255, 40, 40));
+    t[0] = 0;
+    text_cat(t, "LAYER ");
+    int_text(lp.layers + 1, c);
+    text_cat(t, c);
+    cv_text(34, 46, &FONT_M, t, C_WHITE);
+    if (of > tk) {
+        const uint32_t ds = (of - tk) / 4410u;
+        int_text((int32_t)(ds / 10u), t);
+        c[0] = '.';
+        c[1] = (char)('0' + ds % 10u);
+        c[2] = 0;
+        text_cat(t, c);
+        cv_text(232 - text_w(&FONT_L, t), 6, &FONT_L, t, C_ORANGE);
+        cv_text(232 - text_w(&FONT_M, "S LEFT"), 46, &FONT_M, "S LEFT", C_GRAY);
+    }
+    cv_blit(0, 28);
+    cv_begin(240, 80, C_BLACK);                  /* the graph */
+    cv_rect(10, 4, RW, 64, RGB(30, 12, 12));
+    cv_rect(10, 4, (int32_t)x, 64, RGB(70, 20, 20));             /* the part gone */
+    for (i = 1; bf && gw && i * bf < gw; i++)    /* a line at each bar */
+        cv_rect(10 + (int32_t)((uint64_t)i * bf * RW / gw), 4, 1, 64, C_GRAY);
+    if (lp.first && lp.stop && gw)               /* REC pressed again: where it ends (its last bar's end) */
+        cv_rect(9 + (int32_t)((uint64_t)lp.want * RW / gw), 0, 3, 72, C_ORANGE);
+    for (i = 0; i < RW; i++)                     /* what was recorded, about the middle line */
+        if (rec_w[i])
+            cv_rect(10 + (int32_t)i, 36 - rec_w[i], 1, rec_w[i] * 2u, RGB(255, 80, 60));
+    cv_rect(10, 36, RW, 1, C_LINE);
+    cv_rect(10 + (int32_t)x, 0, 2, 72, C_WHITE); /* where it is */
+    cv_blit(0, 108);
+}
+
 static void draw(void)
 {
     draw_header();
@@ -3336,6 +3403,8 @@ static void draw(void)
         draw_perform();
     else if (ui.title)
         draw_title();
+    else if (ui.page == PAGE_PLAY && LP_TAKE_LIVE)
+        draw_rec();
     else if (ui.page == PAGE_FX)
         draw_fx();
     else if (ui.page == PAGE_ENV)
@@ -3701,7 +3770,25 @@ int app_expect(const char *what, int *got)
     }
     else if (!strcmp(what, "loop_has"))
         *got = lp.has;
-    else if (!strcmp(what, "loop_layers"))
+    else if (!strcmp(what, "loop_seam") || !strcmp(what, "loop_tailseam")) {   /* (loop_tailseam: across where the last
+                                              * take's tail began, a layer's end) */   /* 4.14: the loop's level across its seam (its last 1 ms and first 1 ms) in
+                                              * 1/1000 of its whole level: about 1000 when the sound runs on round it */
+        const uint32_t len = lp.total / 2u;
+        lcodec_t c;
+        double all = 0.0, seam = 0.0;
+        uint32_t k;
+        c.m = LOOP_B(lp.cur);
+        c.k = 0;
+        c.pred = c.idx = 0;
+        for (k = 0; k < len; k++) {
+            const double v = (double)lc_dec(&c, len);
+            all += v * v;
+            if (what[5] == 't' ? (k + 22u >= lp.tend && k < lp.tend + 22u) || (lp.tend < 22u && k + 22u >= len + lp.tend)
+                               : k < 22u || k + 22u >= len)
+                seam += v * v;
+        }
+        *got = len > 44u && all > 0.0 ? (int)(1000.0 * sqrt((seam / 44.0) / (all / (double)len))) : 0;
+    } else if (!strcmp(what, "loop_layers"))
         *got = lp.layers;
     else if (!strncmp(what, "msg_", 4) || !strncmp(what, "scr_", 4)) {
         /* msg_TEXT: the header's message now has TEXT in it ('_' a space): 1, else 0. scr_TEXT: the same of what is

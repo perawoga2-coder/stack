@@ -962,3 +962,39 @@ wait 200
 expect loop_state 0
 expect loop_has 0
 expect loop_own 0
+# --- 4.14: the seam. A pad (STRINGS) struck in the take and held across the first layer's close: its tail is laid
+# on the loop's start, so the sound runs on round the seam (no 10 ms dip to silence, no tail cut off)
+turn ALGO -2
+wait 60
+expect track 5
+turn PRESET 15
+wait 60
+expect sound 48
+press REC
+wait 30
+release REC
+wait 300
+key 0 down 100
+wait 1500
+tap REC
+wait 900
+key 0 up
+wait 600
+expect loop_has 1
+expect loop_state 0
+expect loop_seam >500
+# a layer on top with the pad held across its end (REC again): its tail is laid on from where it ended, no 10 ms
+# fade to the loop under it
+key 0 down 100
+wait 200
+press REC
+wait 30
+release REC
+wait 700
+tap REC
+wait 600
+key 0 up
+wait 900
+expect loop_state 0
+expect loop_layers 2
+expect loop_tailseam >500

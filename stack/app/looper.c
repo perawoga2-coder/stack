@@ -25,8 +25,11 @@
  *    sleeps in the other block is whole. When the take ends the blocks change places between two samples, and the one
  *    left is the undo.
  *
- * No seams: the new playing fades in over the take's first 5 ms and out over its last 10 ms. An undo crosses from one
- * block to the other over 10 ms at the same place in the loop; a clear and a stop of the transport fade out over 15 ms.
+ * No seams: the new playing fades in over the take's first 5 ms. Since 4.14 a take does not fade out at its end:
+ * what is played for half a second after it (the tails of what still sounds) is laid on the loop from where the take
+ * ended (a first layer: its start), fading out over that half second, so the sound runs on round the seam as it would
+ * have (lp.tailn, loop_tail; a layer on top: lp.lend). An undo crosses from one block to the other over 10 ms at the same place in the loop; a clear and a
+ * stop of the transport fade out over 15 ms.
  *
  * With a clock coming in (clock.c), or a tempo other than 120, a bar is not a whole number of frames, nor quite the
  * loop's own length: the loop is then steered to its place in the bars (loop_block's phase): it plays up to 0.1 %
@@ -48,6 +51,7 @@
 #define LOOP_PCM 44104u                  /* PERFORM borrows the second block as this many 16-bit samples (perform.c) */
 static int16_t loop_m[2][LOOP_NB * LREC / 2u] __attribute__((section(".pool")));     /* 2 x 91 080 B */
 #define LOOP_B(b) ((uint8_t *)loop_m[b])
+#define TAIL_N 11025u                    /* a first layer's tail laid on its start: 0.5 s of samples (4.14) */
 #define PRE_N 13312u                     /* the queue between the playing and the coder: 0.6 s of samples */
 static int16_t loop_fifo[PRE_N];
 
@@ -113,6 +117,11 @@ static struct {
     uint32_t ncap, nmax;                 /* a layer on top: samples taken, and the most (once round, less its first record's start) */
     uint32_t b0, k0;                     /* a layer on top: the record and the sample it began in */
     uint32_t cb;                         /* fin 2: the record to copy next */
+    uint32_t tailn;                      /* a take that ended: samples of its tail still to lay on the loop (4.14) */
+    uint32_t lend, ncons;                /* a layer on top: its samples (0: not ended yet), and how many are coded */
+    uint32_t tend;                       /* (the simulator's checks: the sample the last tail began at) */
+    volatile float pk;                   /* a take: the loudest of the playing since the screen looked (its graph) */
+    uint8_t seam;                        /* a first layer's tail: when it is laid, the start is met to the end (loop_seam) */
     uint32_t fw, fq, fn;                 /* the queue: where it is written, read, and how many wait */
     lcodec_t rd, we;                     /* the take's coder: the loop that plays read, the other block written */
 } lp = {.div = 2, .bars = 1, .trk = 7, .lvl = 80};
@@ -150,18 +159,13 @@ static inline int32_t lc_dec(lcodec_t *c, uint32_t len)      /* the next sample 
     return r;
 }
 
-static inline void lc_enc(lcodec_t *c, int32_t s, uint32_t len)      /* the next sample written (len 0: it does not go round) */
+/* the next sample, coded into record h (the record c->k is in, or a copy of it being made: loop_tail) */
+static void lc_put(lcodec_t *c, uint8_t *h, int32_t s)
 {
-    uint32_t j, code = 0;
+    uint32_t code = 0;
+    const uint32_t j = c->k & (LB - 1u);
     int32_t step, diff;
-    uint8_t *h, *d;
-    if (len && c->k >= len)
-        c->k = 0;
-    if (c->k >= LOOP_CAP)
-        return;
-    j = c->k & (LB - 1u);
-    h = lc_rec(c);
-    d = h + 4u + (j >> 1);
+    uint8_t *d = h + 4u + (j >> 1);
     if (!j) {
         h[0] = (uint8_t)c->pred;
         h[1] = (uint8_t)((uint32_t)c->pred >> 8);
@@ -188,6 +192,14 @@ static inline void lc_enc(lcodec_t *c, int32_t s, uint32_t len)      /* the next
     *d = (uint8_t)(j & 1u ? (*d & 0x0Fu) | code << 4 : (*d & 0xF0u) | code);
     ima_next(h + 4u, j, &c->pred, &c->idx);  /* (the state goes on as the decoder's will) */
     c->k++;
+}
+
+static inline void lc_enc(lcodec_t *c, int32_t s, uint32_t len)      /* the next sample written (len 0: it does not go round) */
+{
+    if (len && c->k >= len)
+        c->k = 0;
+    if (c->k < LOOP_CAP)
+        lc_put(c, lc_rec(c), s);
 }
 
 /* block blk of a loop of len samples, at sample k and fr on. It is read forwards, a sample at a time; anywhere else
@@ -263,6 +275,101 @@ static void loop_drop(void)                  /* the take is let go: nothing of i
     lp.fn = 0;
 }
 
+/* a tail's record is made here and put into the loop whole when it is done: the loop plays on meanwhile, and a record
+ * half old and half new would not decode (its coder's state goes from sample to sample) */
+static uint8_t tail_rec[LREC];
+
+static void tail_put(int32_t s, uint32_t len)
+{
+    lc_put(&lp.we, tail_rec, s);
+    if (!(lp.we.k & (LB - 1u)) || lp.we.k >= len) {
+        memcpy(LOOP_B(lp.cur) + (lp.we.k - 1u) / LB * LREC, tail_rec, LREC);
+        if (lp.we.k >= len)
+            lp.we.k = 0;                         /* (round the loop's end: a layer's tail goes on at its start) */
+    }
+}
+
+/* the coder as it is after the loop's last sample: record 0 is coded on from there, so its start goes on from the
+ * end with nothing to catch up (a record starting from silence takes many samples to reach a loud sound) */
+static int32_t loop_end_state(uint32_t len, lcodec_t *w)
+{
+    lcodec_t c;
+    int32_t last = 0;
+    c.m = LOOP_B(lp.cur);
+    c.k = (len - 1u) & ~(LB - 1u);
+    c.pred = c.idx = 0;
+    while (c.k < len)
+        last = lc_dec(&c, len);
+    w->pred = c.pred;
+    w->idx = c.idx;
+    return last;
+}
+
+/* a first layer's seam, once its tail is laid: its first 5 ms bent to meet its last sample (the step between them
+ * goes to nothing over 110 samples), so it never clicks where it goes round, whatever was played as it closed */
+static void loop_seam(uint32_t len)
+{
+    int32_t last, d = 0;
+    uint32_t j;
+    lp.rd.m = lp.we.m = LOOP_B(lp.cur);
+    lp.rd.k = lp.we.k = 0;
+    lp.rd.pred = lp.rd.idx = 0;
+    last = loop_end_state(len, &lp.we);
+    for (j = 0; j < LB; j++) {
+        const int32_t v = lc_dec(&lp.rd, len);
+        if (!j)
+            d = last - v;
+        tail_put(j < 110u ? v + d * (int32_t)(110u - j) / 110 : v, len);
+    }
+}
+
+/* a take's tail (4.14): the samples that wait, each on top of the loop where it falls (from the take's end on: a
+ * first layer's start, a layer's end), fading out over TAIL_N; at its end, or when `all` (another take, a clear, the
+ * transport stopped), the rest of that record as it is, so the record decodes whole. rd walks the playing block, we
+ * its record's copy (tail_put) */
+static void loop_tail(uint32_t all)
+{
+    const uint32_t len = lp.total / 2u;
+    uint32_t budget = all ? ~0u : 512u, n = 0, m;
+    if (!lp.tailn)
+        return;
+    m = lp.fn < lp.tailn ? lp.fn : lp.tailn;     /* ended early: the samples that wait fade it out (no cut) */
+    while (budget && lp.fn && lp.tailn) {
+        int32_t s = loop_fifo[lp.fq] * (int32_t)lp.tailn / (int32_t)TAIL_N;
+        lp.fq = lp.fq + 1u < PRE_N ? lp.fq + 1u : 0u;
+        lp.fn--;
+        if (all)
+            s = s * (int32_t)(m - n) / (int32_t)(m + 1u);
+        tail_put(lc_dec(&lp.rd, len) + s, len);
+        lp.tailn--;
+        n++;
+        budget--;
+    }
+    if (!all && lp.tailn)
+        return;
+    while (lp.we.k & (LB - 1u))
+        tail_put(lc_dec(&lp.rd, len), len);
+    if (lp.seam)
+        loop_seam(len);
+    lp.seam = 0;
+    lp.tailn = 0;
+    lp.cap = 0;
+    lp.fn = 0;
+}
+
+/* the tail starts at sample k of the block that plays: its coder is brought there from its record's start */
+static void loop_tail_at(uint32_t k, uint32_t len)
+{
+    lp.tend = k;
+    lp.rd.m = lp.we.m = LOOP_B(lp.cur);
+    lp.rd.k = lp.we.k = k & ~(LB - 1u);
+    lp.rd.pred = lp.rd.idx = 0;
+    lc_head_get(&lp.we);
+    while (lp.we.k < k)
+        tail_put(lc_dec(&lp.rd, len), len);
+    lp.tailn = len / 2u < TAIL_N ? len / 2u : TAIL_N;
+}
+
 /* the take's coder, a block of the audio: the samples that wait in the queue, each on top of the loop's own there
  * (a layer on top), into the other block; then, for a layer on top that has ended, the rest of its last record as
  * the loop is, the records it never came to copied as they are, and the blocks change places */
@@ -272,16 +379,17 @@ static void loop_work(void)
     uint32_t budget = 512u;
     if (lp.state != LP_REC || lp.hold)
         return;
-    while (budget && lp.fn) {
+    while (budget && lp.fn && (lp.first || !lp.lend || lp.ncons < lp.lend)) {
         int32_t s = loop_fifo[lp.fq];
         lp.fq = lp.fq + 1u < PRE_N ? lp.fq + 1u : 0u;
         lp.fn--;
         if (!lp.first)
             s += lc_dec(&lp.rd, len);
         lc_enc(&lp.we, s, len);
+        lp.ncons++;
         budget--;
     }
-    if (lp.first || lp.cap || lp.fn || !len)
+    if (lp.first || !len || (lp.lend ? lp.ncons < lp.lend : lp.cap || lp.fn))
         return;
     if (lp.fin < 2u) {
         while (budget && (lp.we.k & (LB - 1u)) && lp.we.k < len) {
@@ -297,32 +405,30 @@ static void loop_work(void)
         memcpy(LOOP_B(lp.cur ^ 1u) + lp.cb * LREC, LOOP_B(lp.cur) + lp.cb * LREC, LREC);
         lp.cb = (lp.cb + 1u) * LB < len ? lp.cb + 1u : 0u;
     }
-    if (lp.cb == lp.b0)
+    if (lp.cb == lp.b0) {
+        const uint32_t e = lp.lend, k = (lp.k0 + e) % len;
         loop_take_in();
+        if (e && lp.ncap < lp.nmax) {            /* its tail, from where it ended, on the block that now plays */
+            loop_tail_at(k, len);
+            lp.cap = 1;
+        } else {
+            lp.fn = 0;
+        }
+    }
 }
 
-/* a first layer is whole at `want` frames: what waits is coded, its last 10 ms fade out where they lie (decoded and
- * coded again in place: 476 samples at most), and it plays from where it is now. p: frames into the bar now */
+/* a first layer is whole at `want` frames: what waits is coded, and it plays from where it is now; what is played
+ * from here for TAIL_N samples (half a second) is laid on its start (loop_tail). p: frames into the bar now */
 static void loop_first_close(uint32_t want, uint32_t bars, uint32_t p)
 {
-    const uint32_t len = want / 2u, n = len < 220u ? len : 220u, a = len - n;
-    lcodec_t d, e;
-    uint32_t k;
+    const uint32_t len = want / 2u;
+    uint32_t over;
     while (lp.fn) {
         lc_enc(&lp.we, loop_fifo[lp.fq], 0);
         lp.fq = lp.fq + 1u < PRE_N ? lp.fq + 1u : 0u;
         lp.fn--;
     }
-    d.m = e.m = LOOP_B(lp.cur ^ 1u);
-    d.k = e.k = a & ~(LB - 1u);
-    d.pred = d.idx = 0;
-    lc_head_get(&e);
-    for (k = d.k; k < len; k++) {
-        int32_t s = lc_dec(&d, LOOP_CAP);
-        if (k >= a)
-            s = s * (int32_t)(len - 1u - k) / (int32_t)n;
-        lc_enc(&e, s, 0);
-    }
+    over = lp.we.k > len ? lp.we.k - len : 0u;   /* (a sample or so past the end: the tail starts that far in) */
     lp.total = want;
     lp.bars = (uint8_t)bars;
     loop_take_in();
@@ -330,6 +436,32 @@ static void loop_first_close(uint32_t want, uint32_t bars, uint32_t p)
     lp.fr = 0.0f;
     lp.bar = 0;
     lp.off = (lp.frame + want - p % want) % want;
+    loop_tail_at(0, len);                        /* the tail: on top of the start of the block that now plays, */
+    loop_end_state(len, &lp.we);                 /* coded on from the loop's end */
+    {   /* what was taken past the loop's end (REC late: the bars rounded down) is the tail's beginning: laid on first */
+        lcodec_t x;
+        x.m = LOOP_B(lp.cur);
+        x.k = len & ~(LB - 1u);
+        x.pred = x.idx = 0;
+        while (x.k < len)
+            lc_dec(&x, LOOP_CAP);
+        while (over && lp.tailn) {
+            tail_put(lc_dec(&lp.rd, len) + lc_dec(&x, LOOP_CAP) * (int32_t)lp.tailn / (int32_t)TAIL_N, len);
+            lp.tailn--;
+            over--;
+        }
+    }
+    lp.cap = lp.tailn != 0;                      /* the playing is taken on, for the rest of the tail */
+    lp.ncap = 0;
+    lp.nmax = lp.tailn;
+    lp.end_in = 1e9f;
+    lp.seam = 1;
+    if (!lp.tailn) {
+        while (lp.we.k & (LB - 1u))
+            tail_put(lc_dec(&lp.rd, len), len);
+        loop_seam(len);
+        lp.seam = 0;
+    }
 }
 
 /* the audio interrupt, a block: what the main loop asked for, then the loop's n frames into out. bar_off: where in
@@ -344,6 +476,8 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
     const uint32_t maxb = (uint32_t)((float)(LOOP_CAP * 2u) / barf);
     uint32_t i, q = lp.req, len, sounding = 0, rs;
     lp.req = LQ_NONE;
+    if (lp.tailn && (q != LQ_NONE || !playing))  /* another take, an undo, a clear, the transport stopped: the tail is laid now */
+        loop_tail(1);
     lp.maxf = steer ? (uint32_t)((float)maxb * barf) : maxb * pat;
     if (q == LQ_ARM && !playing && lp.armw < 40u) {
         lp.armw++;                               /* (REC started the transport: it runs within a block or two) */
@@ -356,6 +490,7 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
         lp.tk = 0;
         lp.stop = 0;
         lp.fin = 0;
+        lp.lend = lp.ncons = 0;
         lp.full = 0;
         if (!lp.has) {                           /* a first layer: from nothing, from now */
             if (maxb) {
@@ -398,8 +533,8 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
             b = b < 1u ? 1u : b > maxb ? maxb : b;
             lp.bars = (uint8_t)b;
             lp.want = steer ? (uint32_t)((float)b * barf + 0.5f) & ~1u : b * pat;
-        } else if (lp.end_in > 441.0f + (float)REC_LAG) {
-            lp.end_in = 441.0f + (float)REC_LAG;
+        } else if (lp.end_in > (float)REC_LAG) {
+            lp.end_in = (float)REC_LAG;
         }
     } else if (q == LQ_UNDO && lp.state != LP_REC && lp.undo && !lp.fading) {
         if (lp.state)                            /* (a layer on top that waited, its cancel not yet taken: it goes first) */
@@ -529,11 +664,11 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
                 }
             }
         }
-        if (lp.cap) {                            /* the take: the playing, faded in over its first 5 ms and out over its last 10 */
-            float g = lp.tk < 220u ? (float)lp.tk * (1.0f / 220.0f) : 1.0f;
-            if (lp.end_in < 441.0f)
-                g *= lp.end_in > 0.0f ? lp.end_in * (1.0f / 441.0f) : 0.0f;
+        if (lp.cap) {                            /* the take: the playing, faded in over its first 5 ms (its end: a tail) */
+            const float g = lp.tk < 220u ? (float)lp.tk * (1.0f / 220.0f) : 1.0f;
             lp.acc += rec_pv[i] * g;
+            if (rec_pv[i] > lp.pk || -rec_pv[i] > lp.pk)     /* (the screen's graph: the loudest since it looked) */
+                lp.pk = rec_pv[i] > 0.0f ? rec_pv[i] : -rec_pv[i];
             lp.accn++;
         }
         if (steer && lp.total) {
@@ -583,13 +718,18 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
                     }
                     loop_first_close(lp.want, lp.bars, lp.barseen ? lp.tk - lp.bartk : (uint32_t)barf > tb ? (uint32_t)barf - tb : 0u);
                 }
-            } else if (lp.cap && (lp.end_in <= 0.0f || lp.ncap >= lp.nmax)) {
-                lp.cap = 0;                      /* a layer on top has what it takes: loop_work brings it in */
+            } else if (lp.cap && !lp.lend && lp.state == LP_REC && (lp.end_in <= 0.0f || lp.ncap >= lp.nmax)) {
+                lp.lend = lp.ncap;               /* a layer on top has what it takes: loop_work brings it in; what is */
+                lp.nmax = lp.ncap + TAIL_N;      /* played on is its tail */
+                lp.end_in = 1e9f;
+            } else if (lp.cap && lp.ncap >= lp.nmax) {
+                lp.cap = 0;                      /* a tail has all it takes */
             }
         }
         out[i] = v * lp.run;
         sounding |= v != 0.0f;
     }
     loop_work();
+    loop_tail(0);
     return sounding || lp.has;
 }
