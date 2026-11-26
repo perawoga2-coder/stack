@@ -686,8 +686,15 @@ expect fxa 3
 turn K2 60
 wait 30
 expect fxak 53
-tap FX
-wait 60
+# FX twice: its page 2 (the EQ, 4.06), then back (in the 140 ms one press and a wait took before)
+press FX
+wait 38
+release FX
+wait 28
+press FX
+wait 38
+release FX
+wait 28
 wav looper_fx_reverb.wav
 tap REC
 wait 30
@@ -711,8 +718,15 @@ turn K1 -3
 wait 30
 expect fxa 0
 expect fxak 0
-tap FX
-wait 60
+# FX twice: its page 2 (the EQ, 4.06), then back (in the 140 ms one press and a wait took before)
+press FX
+wait 38
+release FX
+wait 28
+press FX
+wait 38
+release FX
+wait 28
 turn ALGO -4
 wait 60
 expect track 1
@@ -746,4 +760,62 @@ expect loop_has 0
 expect loop_own 0
 expect loop_layers 0
 expect store_writes 0
+expect lim_clips 0
+# --- 4.06: the take hears the track's EQ (FX page 2) too. Track 4, the sub bass at F2 (87 Hz): a take dry, then
+# one with LOW at -15 dB: the second loop about 10 dB lower
+turn ALGO -8
+wait 40
+turn ALGO 3
+wait 40
+expect track 4
+expect sound 23
+tap OCT-
+wait 40
+tap REC
+wait 30
+expect loop_state 2
+key w0 down 100
+wait 400
+key w0 up
+wait 1400
+tap REC
+wait 700
+expect loop_layers 1
+expect loop_db0_600 >-26
+press REC
+wait 5200
+release REC
+wait 200
+expect loop_has 0
+tap FX
+wait 40
+tap FX
+wait 40
+expect page 9
+turn K1 -15 20
+wait 40
+expect eq1 -15
+tap REC
+wait 30
+expect loop_state 2
+key w0 down 100
+wait 400
+key w0 up
+wait 1400
+tap REC
+wait 700
+expect loop_layers 1
+expect loop_db0_600 <-30
+press REC
+wait 5200
+release REC
+wait 200
+turn K1 15 20
+tap FX
+wait 40
+expect page 0
+tap OCT+
+wait 40
+tap PLAY
+wait 200
 expect lim_clips 0

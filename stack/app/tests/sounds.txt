@@ -495,3 +495,13 @@ wait 350
 wavstop
 expect lim_clips 0
 shot last_sound.png
+# --- 4.06: the noises tamed. WIND and RAIN were rendered down to DC: held, under ~150 Hz they gave -32 and -33 dBFS,
+# as much as the kicks and basses and far more than any other sound (the loudness's K-weighting does not count what is
+# under 38 Hz), a rumble under the whole mix. They are cut below 150 Hz now (tools/make_sounds.py NOISE_LOWCUT): -50
+# and -47 dBFS there, as the other FX and the keys; their loudness is the others' as before. A kick, a bass for scale
+expect snd_lo65 <-45
+expect snd_lo66 <-45
+expect snd_lo67 <-45
+expect snd_lo68 <-40
+expect snd_lo1 >-25
+expect snd_lo23 >-30

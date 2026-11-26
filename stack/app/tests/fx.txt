@@ -12,8 +12,15 @@ wait 60
 expect page 2
 shot fx_off.png
 leds
-tap FX
-wait 60
+# FX twice: its page 2 (the EQ, 4.06), then back (in the 140 ms one press and a wait took before)
+press FX
+wait 38
+release FX
+wait 28
+press FX
+wait 38
+release FX
+wait 28
 expect page 0
 tap FX
 wait 60
@@ -650,6 +657,167 @@ wavstop
 expect peak_db_max -40
 turn K2 53
 wait 800
+# --- 4.06: FX page 2, the EQ. FX once: page 1 (the effects, open here); again: page 2 (the EQ); again: back.
+# Track 8, SUB BASS
+turn ALGO 8
+wait 40
+expect track 8
+expect sound 0
+turn PRESET 23 20
+wait 60
+expect sound 23
+expect page 2
+tap FX
+wait 40
+expect page 9
+tap FX
+wait 40
+expect page 0
+# (DECAY 0: the bass lets go at once, nothing of one note under the next)
+turn K3 -100 20
+wait 40
+expect decay 0
+tap FX
+wait 40
+expect page 2
+tap FX
+wait 40
+expect page 9
+expect eq1 0
+expect eq2 0
+expect eq3 0
+expect eq4 0
+shot fx_eq_flat.png
+tap OCT-
+wait 40
+expect octave -1
+# all four at 0: no EQ at all (no band runs: the track is bit for bit as before 4.06)
+expect eq_runs >-1
+wav fx_eq_flat.wav
+peakreset
+key w0 down 100
+wait 600
+key w0 up
+wait 400
+wavstop
+expect eq_runs 0
+expect peak_db_min -18
+expect peak_db_max -17
+# the knobs stop at their ends: LOW, MID and HIGH -15 .. +6 dB; MID FREQ 157 Hz .. 6.3 kHz (1 kHz in the middle)
+turn K1 -30 20
+expect eq1 -15
+turn K1 30 20
+expect eq1 6
+turn K1 -6 20
+expect eq1 0
+turn K2 -30 20
+expect eq2 -15
+turn K2 30 20
+expect eq2 6
+turn K2 -6 20
+expect eq2 0
+turn K3 -40 20
+expect eq3 -16
+turn K3 40 20
+expect eq3 16
+turn K3 -16 20
+expect eq3 0
+turn K4 -30 20
+expect eq4 -15
+turn K4 30 20
+expect eq4 6
+turn K4 -6 20
+expect eq4 0
+wait 1000
+expect eq_runs >-1
+# LOW -15 dB (a shelf under 150 Hz): the sub bass at F2 (87 Hz) about 10 dB lower
+turn K1 -15 20
+wait 40
+expect eq1 -15
+shot fx_eq_low.png
+wav fx_eq_low.wav
+peakreset
+key w0 down 100
+wait 600
+key w0 up
+wait 400
+wavstop
+expect eq_runs >0
+expect peak_db_max -25
+# MID +6 dB at 157 Hz (the bass's F2 is 87 Hz, its harmonics above): louder than flat
+turn K1 15 20
+turn K2 6 20
+turn K3 -16 20
+wait 40
+expect eq1 0
+expect eq2 6
+expect eq3 -16
+shot fx_eq_mid.png
+peakreset
+key w0 down 100
+wait 600
+key w0 up
+wait 400
+expect peak_db_min -15
+# HIGH -15 dB (a shelf over 5 kHz) on HAT ROCK: its peak lower
+turn K2 -6 20
+turn K3 16 20
+turn PRESET -20 20
+wait 60
+expect sound 3
+peakreset
+key w0 down 100
+wait 300
+key w0 up
+wait 300
+expect peak_db_min -18.4
+turn K4 -15 20
+wait 40
+expect eq4 -15
+peakreset
+key w0 down 100
+wait 300
+key w0 up
+wait 300
+expect peak_db_max -19
+# back at 0: no band runs again (every WAV of the other tests is bit for bit 4.05's)
+turn K4 15 20
+turn PRESET 20 20
+wait 1000
+expect eq4 0
+expect sound 23
+expect eq_runs >-1
+peakreset
+key w0 down 100
+wait 600
+key w0 up
+wait 400
+expect eq_runs 0
+expect peak_db_min -18
+expect peak_db_max -17
+# (the manual's picture: a little of each)
+spin K1 -4
+spin K2 3
+spin K3 -3
+spin K4 2
+wait 40
+shot fx_eq.png
+spin K1 4
+spin K2 -3
+spin K3 3
+spin K4 -2
+wait 40
+expect eq1 0
+expect eq2 0
+expect eq3 0
+expect eq4 0
+# FX again: back to the tracks
+tap FX
+wait 40
+expect page 0
+tap OCT+
+wait 40
+expect lim_clips 0
 expect bench_fx >0
 expect bench_mid >0
 expect lim_clips 0

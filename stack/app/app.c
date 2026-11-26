@@ -205,7 +205,15 @@ typedef struct {
     volatile uint8_t lfo_s;              /* SHAPE: LFO_SHAPE_NAME */
     volatile uint8_t fx[2];              /* the effect in slot A and in slot B (fx.c FX_*) */
     volatile int8_t fxk[2];              /* their knobs, -FX_MAX .. 0 off .. +FX_MAX */
+    /* the EQ (FX page 2, 4.06): LOW (a shelf under EQ_LOW_HZ), MID (a bell at MID FREQ), HIGH (a shelf over
+     * EQ_HIGH_HZ), each in dB, EQ_MIN .. EQ_MAX, 0 off; MID FREQ -EQ_F .. EQ_F: 1 kHz x 2^(n/6). All 0: no EQ at all */
+    volatile int8_t eq[4];               /* LOW, MID, MID FREQ, HIGH: the knobs' order */
 } track_t;
+#define EQ_MIN (-15)
+#define EQ_MAX 6
+#define EQ_F 16                          /* MID FREQ: 157 Hz .. 6.3 kHz in sixths of an octave */
+#define EQ_LOW_HZ 150.0f
+#define EQ_HIGH_HZ 5000.0f
 static track_t trk[NTRK];
 
 /* --- the LFO: a slow wave in time with the tempo that moves one thing of its track. PITCH (vibrato) starts again at
@@ -311,6 +319,7 @@ static volatile uint32_t voices_on;      /* for the screen and the tests */
 static struct {
     float lp1, lp2, hp1, hp2, a, b, gain;
     float pan;                           /* the LFO's PAN as it glides: -1 left .. 0 .. 1 right */
+    float eq[2][3][2];                   /* the EQ's three filters' state: the track, and a take's part of it (rb) */
 } bus[NTRK];
 static float gain_now;
 
@@ -1078,8 +1087,61 @@ static void voice_render(voice_t *v, float *out, uint32_t n, const env_t *e, flo
     v->att = att;
 }
 
+/* the EQ (FX page 2): band 0 LOW, 1 MID, 2 HIGH, at db dB; the RBJ cookbook's shelves (S 1) and bell (Q 1) at 44.1
+ * kHz (Robert Bristow-Johnson, "Cookbook formulae for audio EQ biquad filter coefficients"). A band at 0 dB is not
+ * run: the track is then bit for bit as without it. (Small in the flash: whole steps of dB and of sixths of an octave
+ * are powers by multiplying, and sin and cos of an angle under 1 are their series) */
+static float eq_pow(float r, int32_t n)      /* r to the n */
+{
+    float v = 1.0f;
+    if (n < 0) {
+        r = 1.0f / r;
+        n = -n;
+    }
+    while (n--)
+        v *= r;
+    return v;
+}
+static float eq_hz(int32_t n) { return 1000.0f * eq_pow(1.1224620f, n); }   /* MID FREQ: 1 kHz x 2^(n/6) */
+static void eq_band(float *x, uint32_t n, float *z, uint32_t band, int32_t db, float hz)
+{
+    const float sA = eq_pow(1.0292005f, db), A = sA * sA;   /* (10^(1/80): A is 10^(db/40)) */
+    const float w = hz * (FM_TWO_PI / 44100.0f), w2 = w * w;   /* (under 0.91: 6.3 kHz at most) */
+    const float sn = w * (1.0f - w2 * (1.0f / 6.0f) * (1.0f - w2 * (1.0f / 20.0f) * (1.0f - w2 * (1.0f / 42.0f))));   /* (1e-6) */
+    const float cs = 1.0f - w2 * 0.5f * (1.0f - w2 * (1.0f / 12.0f) * (1.0f - w2 * (1.0f / 30.0f) * (1.0f - w2 * (1.0f / 56.0f))));
+    float b0, b1, b2, a0, a1, a2, z1 = z[0], z2 = z[1];
+    uint32_t i;
+    if (band == 1u) {                        /* a bell: Q 1 */
+        const float al = sn * 0.5f;
+        b0 = 1.0f + al * A;
+        b2 = 1.0f - al * A;
+        a0 = 1.0f + al / A;
+        a2 = 1.0f - al / A;
+        b1 = a1 = -2.0f * cs;
+    } else {                                 /* a shelf: the high one is the low one with cos and the odd terms turned */
+        const float c = band ? -cs : cs, sa = 1.4142136f * sA * sn, s = band ? -1.0f : 1.0f;
+        b0 = A * ((A + 1.0f) - (A - 1.0f) * c + sa);
+        b1 = s * 2.0f * A * ((A - 1.0f) - (A + 1.0f) * c);
+        b2 = A * ((A + 1.0f) - (A - 1.0f) * c - sa);
+        a0 = (A + 1.0f) + (A - 1.0f) * c + sa;
+        a1 = s * -2.0f * ((A - 1.0f) + (A + 1.0f) * c);
+        a2 = (A + 1.0f) + (A - 1.0f) * c - sa;
+    }
+    a0 = 1.0f / a0;
+    b0 *= a0, b1 *= a0, b2 *= a0, a1 *= a0, a2 *= a0;
+    for (i = 0; i < n; i++) {                /* (transposed direct form II) */
+        const float v = x[i], y = b0 * v + z1;
+        z1 = b1 * v - a1 * y + z2;
+        z2 = b2 * v - a2 * y;
+        x[i] = y;
+    }
+    z[0] = fm_flush(z1);
+    z[1] = fm_flush(z2);
+}
+
 #ifdef PLAT_HOST
 static uint32_t host_sounded;                /* (the simulator's checks: the tracks whose own voices sounded, a bit each) */
+static uint32_t host_eq_runs;                /* (and the EQ's bands run, a block each) */
 #endif
 static void render_part(int32_t *lr, uint32_t n, float gain)
 {
@@ -1272,6 +1334,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         if (!anyr) {
             recf[t][0] = recf[t][1] = recf[t][2] = recf[t][3] = 0.0f;
             memset(recx[t], 0, sizeof recx[t]);
+            memset(bus[t].eq[1], 0, sizeof bus[t].eq[1]);
         }
         if (!any && fm_fabsf(lp2) < 1e-6f && fm_fabsf(hp2) < 1e-6f) {
             bus[t].a = a_t;                  /* silent: nothing to filter, the knobs' values taken at once */
@@ -1279,6 +1342,7 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             bus[t].gain = g_t;
             bus[t].pan = pan_t;
             bus[t].lp1 = bus[t].lp2 = bus[t].hp1 = bus[t].hp2 = 0.0f;
+            memset(bus[t].eq, 0, sizeof bus[t].eq);
             continue;
         }
         for (i = 0; i < n; i++) {
@@ -1306,6 +1370,20 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         if (anyr)                                /* (the two filters are the one filter on the sum: it is linear) */
             for (i = 0; i < n; i++)
                 tb[i] += rb[i];
+        for (q = 0; q < 3u; q++) {               /* the EQ: LOW, MID, HIGH (a band at 0 dB does nothing, not even run) */
+            const int32_t db = trk[t].eq[q + (q >> 1)];
+            const float hz = q == 0u ? EQ_LOW_HZ : q == 2u ? EQ_HIGH_HZ : eq_hz(trk[t].eq[2]);
+            if (!db) {
+                bus[t].eq[0][q][0] = bus[t].eq[0][q][1] = bus[t].eq[1][q][0] = bus[t].eq[1][q][1] = 0.0f;
+                continue;
+            }
+#ifdef PLAT_HOST
+            host_eq_runs++;
+#endif
+            eq_band(tb, n, bus[t].eq[0][q], q, db, hz);
+            if (anyr)                            /* (the take's part alone too: what it hears) */
+                eq_band(rb, n, bus[t].eq[1][q], q, db, hz);
+        }
         for (q = 0; q < 2u; q++)                 /* OVERDRIVE and LO-FI: on the track itself, slot A then B */
             if (ft[q] == FX_DRIVE || ft[q] == FX_LOFI) {
                 fx_inline(ft[q], fs[q], fa[q], &fx_slot[t][q], tb, n);
@@ -1475,6 +1553,7 @@ static void defaults(void)
         lfo_ph[t] = 0.0f;
         trk[t].fx[0] = trk[t].fx[1] = FX_OFF;
         trk[t].fxk[0] = trk[t].fxk[1] = 0;
+        trk[t].eq[0] = trk[t].eq[1] = trk[t].eq[2] = trk[t].eq[3] = 0;
         for (i = 0; i < NSTEP; i++) {
             step_on[t][i] = 0;
             step_note[t][i] = 60;
@@ -1493,7 +1572,8 @@ static uint32_t my_t0;                       /* plat_ms at the start */
  * alone and the FM-1 starts as new. Writing the flash stops the sound for a moment: SAVE works while stopped --- */
 #define SONG_MAGIC 0x314B5453u               /* "STK1" */
 #define SONG_VER 1u
-#define SONG_TRK 68u                         /* bytes a track: its sound 8, its settings 25, its steps 16 and their notes 16 */
+#define SONG_TRK 68u                         /* bytes a track: its sound 8, its settings 25, its steps 16 and their notes 16;
+                                              * since 4.06 the EQ in the three left (33, 66, 67: eq_word) */
 #define SONG_LEN (16u + NTRK * SONG_TRK)
 static uint8_t song_buf[SONG_LEN];
 static struct { uint8_t slot; uint32_t crc; } song_my[NTRK];   /* a track waits for its sample (slot 1 + k; 0: none) */
@@ -1528,6 +1608,25 @@ static void put32(uint8_t *p, uint32_t v)
     F(T.arp_r, 0, (int32_t)NARP_R - 1) F(T.arp_m, 0, (int32_t)NARP_M - 1) F(T.arp_o, 1, 3) F(T.arp_g, 10, 100) \
     F(T.fx[0], 0, (int32_t)NFX - 1) F(T.fx[1], 0, (int32_t)NFX - 1) F(T.fxk[0], -FX_MAX, FX_MAX) F(T.fxk[1], -FX_MAX, FX_MAX)
 
+/* the EQ in three bytes, one 24-bit number (the record's and the dump's bytes that were 0 till 4.06: an older song,
+ * all 0, is no EQ): bits 0-4 LOW, 5-9 MID, 10-15 MID FREQ, 16-20 HIGH, each two's complement */
+static const uint8_t EQ_SH[5] = {0, 5, 10, 16, 21};
+static uint32_t eq_word(uint32_t t)
+{
+    uint32_t q, w = 0;
+    for (q = 0; q < 4u; q++)
+        w |= ((uint32_t)trk[t].eq[q] & ((1u << (EQ_SH[q + 1u] - EQ_SH[q])) - 1u)) << EQ_SH[q];
+    return w;
+}
+static void eq_unword(uint32_t t, uint32_t w)
+{
+    uint32_t q;
+    for (q = 0; q < 4u; q++) {
+        const uint32_t up = 32u - EQ_SH[q + 1u], b = EQ_SH[q + 1u] - EQ_SH[q];
+        trk[t].eq[q] = (int8_t)clamp((int32_t)(w << up) >> (32u - b), q == 2u ? -EQ_F : EQ_MIN, q == 2u ? EQ_F : EQ_MAX);
+    }
+}
+
 static int song_save(void)                   /* 0: kept */
 {
     uint32_t t, i;
@@ -1557,6 +1656,10 @@ static int song_save(void)                   /* 0: kept */
             p[34u + i] = step_on[t][i] ? 1u : 0u;
             p[50u + i] = step_note[t][i];
         }
+        i = eq_word(t);                      /* the EQ (4.06): in the three bytes left over */
+        p[33] = (uint8_t)i;
+        p[66] = (uint8_t)(i >> 8);
+        p[67] = (uint8_t)(i >> 16);
     }
     return plat_store_save(OBJ_SETTINGS, song_buf, SONG_LEN);
 }
@@ -1605,6 +1708,7 @@ static int song_load(void)                   /* 1: a song was there and is in pl
             step_on[t][i] = (uint8_t)(p[34u + i] != 0u);
             step_note[t][i] = (uint8_t)(p[50u + i] & 127u);
         }
+        eq_unword(t, p[33] | (uint32_t)p[66] << 8 | (uint32_t)p[67] << 16);   /* (before 4.06: 0, no EQ) */
     }
     song_my_place();
     return 1;
@@ -1673,8 +1777,8 @@ void app_init(void)
 }
 
 /* --------------------------------------------------------------------- UI --- */
-enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV, PAGE_LFO, PAGE_EDIT, PAGE_ARP, PAGE_EDIT2, PAGE_GLO };
-#define PG4(p) ((p) == PAGE_EDIT ? 0u : (p) == PAGE_ARP ? 1u : (p) == PAGE_EDIT2 ? 2u : 3u)   /* page_words' pages */
+enum { PAGE_PLAY, PAGE_STEP, PAGE_FX, PAGE_ENV, PAGE_LFO, PAGE_EDIT, PAGE_ARP, PAGE_EDIT2, PAGE_GLO, PAGE_EQ };
+#define PG4(p) ((p) == PAGE_EDIT ? 0u : (p) == PAGE_ARP ? 1u : (p) == PAGE_EDIT2 ? 2u : (p) == PAGE_EQ ? 4u : 3u)   /* page_words' pages */
 static struct {
     char msg[2][28];                     /* a short message over the header */
     uint32_t msg_until;
@@ -1938,6 +2042,13 @@ static void knob_turn(uint32_t k, int32_t e)
             int32_t bpm = clamp((int32_t)(44100.0f * 15.0f / seq_sf + 0.5f) + e, 40, 240);
             seq_sf = 44100.0f * 60.0f / ((float)bpm * 4.0f);
         }
+        ui.redraw = 1;
+        return;
+    }
+    if (ui.page == PAGE_EQ) {                /* FX page 2, the EQ: LOW, MID, MID FREQ, HIGH */
+        ui.hot = (int8_t)k;
+        ui.hot_t = plat_ms();
+        t->eq[k] = (int8_t)clamp(t->eq[k] + e, k == 2u ? -EQ_F : EQ_MIN, k == 2u ? EQ_F : EQ_MAX);
         ui.redraw = 1;
         return;
     }
@@ -2334,13 +2445,16 @@ static void input(void)
         } else if (k == B_SEQ && on_t8l()) {     /* the looper's track has no steps */
             say_t8l();
         } else if (k == B_SEQ || k == B_FX || k == B_ENV || k == B_LFO || k == B_EDIT || k == B_ARP || k == B_GLO) {
-            /* SEQ: the steps and back; FX, ENV, LFO, ARP, GLO: their pages and back; EDIT: its page 1, its page 2, back */
+            /* SEQ: the steps and back; ENV, LFO, ARP, GLO: their pages and back; EDIT: its page 1, its page 2, back;
+             * FX the same: its page 1 (the effects), its page 2 (the EQ, 4.06), back */
             uint32_t to = k == B_SEQ ? PAGE_STEP : k == B_FX ? PAGE_FX : k == B_ENV ? PAGE_ENV : k == B_LFO ? PAGE_LFO :
                           k == B_EDIT ? PAGE_EDIT : k == B_ARP ? PAGE_ARP : PAGE_GLO;
             if (k == B_EDIT && ui.page == PAGE_EDIT)
                 ui.page = PAGE_EDIT2;
-            else if (k == B_EDIT && ui.page == PAGE_EDIT2)
+            else if ((k == B_EDIT && ui.page == PAGE_EDIT2) || (k == B_FX && ui.page == PAGE_EQ))
                 ui.page = PAGE_PLAY;
+            else if (k == B_FX && ui.page == PAGE_FX)
+                ui.page = PAGE_EQ;
             else
             ui.page = (uint8_t)(ui.page == to ? PAGE_PLAY : to);
             ui.held_step = -1;
@@ -2349,7 +2463,7 @@ static void input(void)
                     ev_put(QE_OFF, ui.trk_of[e], ui.note_of[e], 0);
             app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : ui.page == PAGE_ENV ? "ENV PAGE" :
                     ui.page == PAGE_LFO ? "LFO PAGE" : ui.page == PAGE_EDIT ? "EDIT PAGE 1" : ui.page == PAGE_ARP ? "ARP PAGE" :
-                    ui.page == PAGE_EDIT2 ? "EDIT PAGE 2" : ui.page == PAGE_GLO ? "GLO PAGE" : "TRACKS PAGE", "");
+                    ui.page == PAGE_EDIT2 ? "EDIT PAGE 2" : ui.page == PAGE_GLO ? "GLO PAGE" : ui.page == PAGE_EQ ? "FX PAGE 2: EQ" : "TRACKS PAGE", "");
             if (ui.page == PAGE_EDIT && on_t8l())
                 app_say("THE LOOP'S TRACK:", "NOTHING TO EDIT");
         } else {
@@ -2447,7 +2561,7 @@ static void input(void)
     ui_step_isr = ui.page == PAGE_STEP;
     lit_btn = (lp.req == LQ_ARM || (lp.state != LP_IDLE && (!(lp.first && lp.stop) || (plat_ms() >> 7 & 1u))) ? 1u << B_REC : 0u) |
               (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
-              (ui.page == PAGE_FX ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT || ui.page == PAGE_EDIT2 ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (ui.page == PAGE_GLO ? 1u << B_GLO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
+              (ui.page == PAGE_FX || ui.page == PAGE_EQ ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT || ui.page == PAGE_EDIT2 ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (ui.page == PAGE_GLO ? 1u << B_GLO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
         for (k = 0; k < seq_len; k++)
             if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
@@ -2495,6 +2609,22 @@ static void page_words(uint32_t pg, char w[4][28], int32_t *pos)
         p4[1] = t->fit * 226 / ((int32_t)NFIT - 1);
         p4[2] = seq_sig * 226 / ((int32_t)NSIG - 1);
         p4[3] = clamp((int32_t)(44100.0f * 15.0f / (ck_tick_frames() * 6.0f) + 0.5f) - 40, 0, 200) * 226 / 200;
+    } else if (pg == 4u) {                   /* the EQ: "+3 DB", "1300 HZ" */
+        for (q = 0; q < 4u; q++) {
+            const int32_t v = t->eq[q];
+            if (q == 2u) {                   /* (two figures: 160 HZ .. 890 HZ, 1000 HZ .. 6400 HZ) */
+                const int32_t hz = (int32_t)eq_hz(v), r = hz < 1000 ? 10 : 100;
+                int_text((hz + r / 2) / r * r, w[2]);
+                text_cat(w[2], " HZ");
+                p4[2] = (v + EQ_F) * 226 / (2 * EQ_F);
+            } else {
+                if (v > 0)
+                    text_cat(w[q], "+");
+                int_text(v, w[q] + (v > 0));
+                text_cat(w[q], " DB");
+                p4[q] = (v - EQ_MIN) * 226 / (EQ_MAX - EQ_MIN);
+            }
+        }
     } else if (pg == 3u) {
         text_cat(w[0], bt_on ? "ON" : "OFF");
         text_cat(w[3], pf_latch ? "ON" : "OFF");
@@ -2591,7 +2721,7 @@ static void draw_header(void)
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
-        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : ui.page == PAGE_LFO ? "LFO" : ui.page == PAGE_EDIT ? "EDIT 1" : ui.page == PAGE_ARP ? "ARP" : ui.page == PAGE_EDIT2 ? "EDIT 2" : ui.page == PAGE_GLO ? "GLO" : "TRACKS",
+        cv_text(x + 8, 2, &FONT_XS, ui.page == PAGE_STEP ? "STEPS" : ui.page == PAGE_FX ? "FX" : ui.page == PAGE_ENV ? "ENV" : ui.page == PAGE_LFO ? "LFO" : ui.page == PAGE_EDIT ? "EDIT 1" : ui.page == PAGE_ARP ? "ARP" : ui.page == PAGE_EDIT2 ? "EDIT 2" : ui.page == PAGE_GLO ? "GLO" : ui.page == PAGE_EQ ? "FX 2 EQ" : "TRACKS",
                 C_GRAY);
         t[0] = 0;
         text_cat(t, "OCT ");
@@ -2745,11 +2875,12 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     char v[12];
     cv_begin(240, 52, C_BLACK);
     cv_rect(0, 0, 240, 1, C_LINE);
-    if (ui.page >= PAGE_EDIT) {              /* the EDIT, ARP and GLO pages: their four knobs and their values */
-        static const char *const N4[4][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
-                                             {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "", "", "LATCH"}};
-        static const char *const BACK[4] = {"EDIT: PAGE 2", "ARP: BACK TO THE TRACKS", "EDIT: BACK TO THE TRACKS",
-                                            "GLO: BACK   REC: DISCONNECT"};
+    if (ui.page >= PAGE_EDIT) {              /* the EDIT, ARP, GLO and EQ pages: their four knobs and their values */
+        static const char *const N4[5][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
+                                             {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "", "", "LATCH"},
+                                             {"LOW", "MID", "MID FREQ", "HIGH"}};
+        static const char *const BACK[5] = {"EDIT: PAGE 2", "ARP: BACK TO THE TRACKS", "EDIT: BACK TO THE TRACKS",
+                                            "GLO: BACK   REC: DISCONNECT", "FX: BACK TO THE TRACKS"};
         const uint32_t pg = PG4(ui.page);
         char w4[4][28];
         page_words(pg, w4, 0);
@@ -2807,7 +2938,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             cv_text(x, 3, &FONT_T, FN[k], hot ? C_WHITE : C_GRAY);
             cv_text(x, 16, &FONT_B, k < 2u ? "A" : "B", hot ? C_WHITE : C_HI);
         }
-        cv_text(4, 40, &FONT_T, "FX: BACK TO THE TRACKS", C_DIM);
+        cv_text(4, 40, &FONT_T, "FX: PAGE 2 (EQ)", C_DIM);
         cv_blit(0, 188);
         return;
     }
@@ -2987,8 +3118,9 @@ static void draw_lfo(void)
  * words and a line that shows where the knob stands */
 static void draw_page4(uint32_t pg)
 {
-    static const char *const NAME[4][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
-                                           {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "STATUS", "DISCONNECT", "PERFORM LATCH"}};
+    static const char *const NAME[5][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
+                                           {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "STATUS", "DISCONNECT", "PERFORM LATCH"},
+                                           {"EQ LOW", "EQ MID", "MID FREQ", "EQ HIGH"}};
     const track_t *tr = &trk[ui.sel];
     const sound_t *snd = list_sound(tr->sound);
     const uint32_t t8 = !pg && on_t8l();
@@ -3020,6 +3152,10 @@ static void draw_page4(uint32_t pg)
         }
         text_cat(w[2], " (ALL TRACKS)");
         text_cat(w[3], ck_follow ? " FROM THE CLOCK IN" : " BPM (ALL TRACKS)");
+    } else if (pg == 4u) {                   /* (0 dB is no EQ at all) */
+        for (q = 0; q < 4u; q++)
+            if (q != 2u && !tr->eq[q])
+                text_cat(w[q], ": OFF");
     } else if (pg == 3u) {
         text_cat(w[1], !bt_on ? "OFF" : plat_ble_connected() ? "CONNECTED" : plat_ble_linked() ? "CONNECTING" : "WAITING");
         text_cat(w[2], "PRESS REC");
@@ -3027,7 +3163,8 @@ static void draw_page4(uint32_t pg)
     for (q = 0; q < 4u; q++) {
         int32_t y = q < 2u ? 22 + (int32_t)q * 29 : 2 + (int32_t)(q - 2u) * 29;
         uint32_t off = t8 || (pg == 1u && q != 0u && !tr->arp_r) ||     /* (the ARP off: the rest waits) */
-                       (pg == 2u && q == 3u && ck_follow) || (pg == 3u && q == 2u && !plat_ble_linked());
+                       (pg == 2u && q == 3u && ck_follow) || (pg == 3u && q == 2u && !plat_ble_linked()) ||
+                       (pg == 4u && q == 2u && !tr->eq[1]);  /* (MID off: its FREQ waits) */
         int hot = ui.hot == (int8_t)q && plat_ms() - ui.hot_t < 900u;
         if (!(q & 1u)) {
             cv_begin(240, 80, C_BLACK);
@@ -3672,6 +3809,12 @@ int app_expect(const char *what, int *got)
         *got = trk[ui.sel].fx[what[2] - 'a'];
     else if (!strcmp(what, "fxak") || !strcmp(what, "fxbk"))     /* and its knob */
         *got = trk[ui.sel].fxk[what[2] - 'a'];
+    else if (!strncmp(what, "eq", 2) && what[2] >= '1' && what[2] <= '4' && !what[3])   /* eqN: the EQ page's knob N */
+        *got = trk[ui.sel].eq[what[2] - '1'];
+    else if (!strcmp(what, "eq_runs")) {     /* the EQ's bands run since the last look, a block each (0: no EQ at all) */
+        *got = (int)host_eq_runs;
+        host_eq_runs = 0;
+    }
     else if (!strcmp(what, "fx_awake")) {    /* the effects' buses that run now */
         uint32_t b;
         for (*got = 0, b = 0; b < NBUS; b++)
@@ -3735,6 +3878,49 @@ int app_expect(const char *what, int *got)
             voice[i].state = V_OFF;
         memcpy(trk, save, sizeof save);
         fx_reset();
+    }
+    else if (!strncmp(what, "snd_lo", 6)) {  /* host only: snd_loN: built-in sound N (its place in the list) as a key
+                                              * held 1 s plays it at its own pitch, its part under ~150 Hz (four
+                                              * one-pole low-passes), in dB of full scale (the RMS); 4.06 */
+        const uint32_t li = (uint32_t)atoi(what + 6);
+        const sound_t *sd = li >= 1u && li <= NSOUNDS ? &SOUNDS[li - 1u] : 0;
+        const float a = 1.0f - fm_expf(-6.2831853f * 150.0f / (sd ? sd->rate : 1.0f));
+        float f1 = 0.0f, f2 = 0.0f, f3 = 0.0f, f4 = 0.0f;
+        double e = 0.0;
+        int32_t pred = 0, idx = 0;
+        uint32_t i, k, n = sd ? (uint32_t)sd->rate : 0u;
+        for (i = k = 0; sd && i < n; i++, k++) {
+            int32_t v;
+            if (k >= sd->n) {                    /* the end: a held sound goes round its loop, a one-shot is silent */
+                if (!(sd->flags & SF_LOOP))
+                    break;
+                k = sd->ls;
+                pred = sd->lpred;
+                idx = sd->lidx;
+            }
+            if (sd->flags & SF_PCM) {
+                v = ((const int16_t *)sd->d)[k];
+            } else {                             /* IMA ADPCM, low nibble first */
+                const uint32_t nb = (((const uint8_t *)sd->d)[k >> 1] >> ((k & 1u) * 4u)) & 15u;
+                int32_t st = IMA_STEP[idx], df = st >> 3;
+                if (nb & 4u)
+                    df += st;
+                if (nb & 2u)
+                    df += st >> 1;
+                if (nb & 1u)
+                    df += st >> 2;
+                pred = clamp(nb & 8u ? pred - df : pred + df, -32768, 32767);
+                idx = clamp(idx + IMA_INDEX[nb & 7u], 0, 88);
+                v = pred;
+            }
+            f1 += a * ((float)v / 32768.0f - f1);
+            f2 += a * (f1 - f2);
+            f3 += a * (f2 - f3);
+            f4 += a * (f3 - f4);
+            e += (double)f4 * f4;
+        }
+        *got = sd && e > 0.0 ? (int)(10.0 * log10(e / n) - 0.5) : -99;
+        printf("  %s: %s, %d dBFS under ~150 Hz\n", what, sd ? sd->name : "(none)", *got);
     }
     else if (!strcmp(what, "cat"))           /* the selected track's sound's category (0 DRUMS .. 5 FX), -1 none */
         *got = list_sound(trk[ui.sel].sound) ? list_sound(trk[ui.sel].sound)->cat : -1;

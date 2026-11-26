@@ -13,6 +13,10 @@ Each sound is cut (a one-shot ends on a short fade; a held sound gets a loop of 
 cross-fade, baked into its end), brought to the same loudness, and stored as IMA ADPCM (4 bits a sample, mono) or,
 for a single cycle, as 16-bit PCM.
 
+Noise (sounds.json "noise": WIND, RAIN) is rendered down to DC: under 40 Hz it held more than any other sound (a
+kick's included), which the loudness's K-weighting (its high-pass at 38 Hz) does not count. Since 4.06 a noise is
+first cut below NOISE_LOWCUT (a 4th-order high-pass: two Butterworth sections), then brought to the loudness as any.
+
 Loudness: the ITU-R BS.1770 K-weighting, then the loudest 100 ms (mean square); every sound is scaled to TARGET_DB
 there. A sound whose peak would then pass PEAK is turned down to it (the list printed says which, and by how much).
 The ADPCM is the IMA standard's (IMA Digital Audio Focus and Technical Working Groups, "Recommended Practices for
@@ -25,6 +29,7 @@ import numpy as np
 TARGET_DB = -15.5       # K-weighted mean square of the loudest 100 ms, dB re full scale
 PEAK = 0.89             # no sound's own peak passes -1 dBFS
 CK = 512                # a decoder state is kept every CK samples (app.c SND_CK)
+NOISE_LOWCUT = 150.0    # Hz: a noise's low-cut (4.06); every other sound is as it was
 CATS = ["DRUMS", "BASS", "KEYS", "PAD", "LEAD", "FX"]
 
 IMA_STEP = [  # the standard's 89 step sizes, ten a row
@@ -104,6 +109,15 @@ def k_weight(x, rate):
     return biquad(x, [1.0, -2.0, 1.0], [1.0, 2.0 * (K * K - 1.0) / a0, (1.0 - K / Q + K * K) / a0])
 
 
+def low_cut(x, rate, hz):
+    """a 4th-order Butterworth high-pass at hz (two sections, Q 0.541 and 1.307: the RBJ cookbook's high-pass)"""
+    for q in (0.5411961001461969, 1.3065629648763766):
+        w = 2.0 * math.pi * hz / rate
+        al, c = math.sin(w) / (2.0 * q), math.cos(w)
+        x = biquad(x, [(1.0 + c) / 2.0, -(1.0 + c), (1.0 + c) / 2.0], [1.0 + al, -2.0 * c, 1.0 - al])
+    return x
+
+
 def loudness_db(x, rate, loop=None):
     """the loudest 100 ms of the K-weighted sound, dB (a held sound: its loop played round for half a second after)"""
     if loop:
@@ -174,6 +188,8 @@ def main(argv):
         x = x[max(0, int(nz[0]) - 8):] if len(nz) else x
         if s.get("skip"):
             x = x[int(s["skip"] * rate):]
+        if s.get("noise"):
+            x = low_cut(x, rate, NOISE_LOWCUT)
         ls = le = 0
         if s.get("cycle"):
             ls, le = 0, len(x)
@@ -233,6 +249,8 @@ def main(argv):
            f"{len(rows)} sounds, {total / 1024:.1f} KiB: " + ", ".join(f"{c} {counts[c]}" for c in CATS) + ".",
            "Stored as IMA ADPCM (4 bits a sample) or, the single cycles, 16-bit PCM; mono. Every sound is brought to the same",
            f"loudness (ITU-R BS.1770 K-weighting, the loudest 100 ms at {TARGET_DB:g} dB) with its own peak at {20 * math.log10(PEAK):.1f} dBFS at most.",
+           f"The noises (WIND, RAIN) are first cut below {NOISE_LOWCUT:g} Hz (since 4.06): rendered down to DC, they held more",
+           "under 40 Hz than any other sound, a rumble under the whole mix.",
            "", "| # | Category | Name | Source | Licence | File | Rate | Length |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for n, r in enumerate(rows):
         doc.append(f"| {n + 1} | {r[0]} | {r[1]} | {r[2]} | {r[3]} | `{r[4]}` | {r[5]} Hz | {r[6]:.2f} s |")

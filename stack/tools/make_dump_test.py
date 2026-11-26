@@ -38,6 +38,7 @@ def track(kind="", name=None, **over):
              lfo_a=0, lfo_r=6, lfo_t=0, lfo_s=0, ed_start=0, ed_rev=0, ed_loop=0, ed_len=100, fit=0, arp_r=0, arp_m=0,
              arp_o=1, arp_g=50, fxa=0, fxb=0, fxak=0, fxbk=0)
     steps = over.pop("steps", {})
+    eq = over.pop("eq", (0, 0, 0, 0))       # LOW, MID, MID FREQ, HIGH (4.06)
     f.update(over)
     p = bytearray(TRK)
     p[1] = 255
@@ -53,6 +54,8 @@ def track(kind="", name=None, **over):
     p[88:88 + len(cat)] = cat.encode()
     for i, k in enumerate(f):
         p[28 + i] = f[k] & 255
+    w = (eq[0] & 31) | (eq[1] & 31) << 5 | (eq[2] & 63) << 10 | (eq[3] & 31) << 16
+    p[53:56] = w.to_bytes(3, "little")       # the EQ: one 24-bit number, after the 25 settings
     for i in range(16):
         p[56 + i] = 1 if i in steps else 0
         p[72 + i] = steps.get(i, 60)
@@ -103,15 +106,16 @@ ask_song(song([track(name=n) for n in START]))
 many("expect dump_sent 7", "expect dump_held 0",
      "# a piece past the end: an answer with no bytes",
      "sysex_out", "sysex " + frame(30, [7, 0]), "wait 4", "expect_sysex " + frame(30, [7, 0, 7, 0]),
-     "# --- the song changed, and not saved: the dump is of what is there NOW",
+     "# --- the song changed, and not saved: the dump is of what is there NOW (4.06: the EQ, FX page 2, on track 6)",
      "turn K1 3", "turn K4 -30", "wait 40", "tap SEQ", "wait 40", "key w0 down 100", "wait 20", "key w0 up", "wait 20",
      "key w6 down 100", "wait 20", "key w6 up", "wait 40", "tap SEQ", "wait 40",
      "turn ALGO 4", "wait 40", "turn PRESET 4", "wait 60", "expect sound 37", "turn K2 -12", "wait 40",
-     "tap FX", "wait 40", "turn K1 2", "turn K2 30", "wait 40", "tap FX", "wait 40",
+     "tap FX", "wait 40", "turn K1 2", "turn K2 30", "wait 40", "tap FX", "spin ALGO 1", "spin K1 -7", "spin K2 2",
+     "spin K3 -5", "spin K4 3", "spin ALGO -1", "wait 34", "expect page 9",
      "tap EDIT", "wait 40", "tap EDIT", "wait 40", "turn K1 10", "turn K3 -1", "turn K4 -20", "wait 40", "tap EDIT",
      "wait 40", "expect store_writes 0")
 T = [track(name="KICK ROCK", pitch=3, level=50, steps={0: 60, 6: 60}), track(name="SNARE ROCK"), track(name="HAT ROCK"),
-     track(name="SUB BASS"), track(name="ORGAN", filt=-12, fxa=2, fxak=30), track(name="SAW LEAD"), track(), track()]
+     track(name="SUB BASS"), track(name="ORGAN", filt=-12, fxa=2, fxak=30), track(name="SAW LEAD", eq=(-7, 2, -5, 3)), track(), track()]
 ask_song(song(T, bpm=100, sig=1, steps=12, swing=60, sel=4))
 many("expect store_writes 0",
      "# --- the loop: none yet",

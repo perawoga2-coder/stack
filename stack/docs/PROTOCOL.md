@@ -215,6 +215,7 @@ Then eight tracks of 96 bytes, T1 first:
 | 8 | 4 | kind 2: the CRC-32 the sample's header names for its data (as the app sent it) |
 | 12 | 16 | the sound's name as text, zero-padded: `KICK ROCK`, a sample's own name, `LOOP` |
 | 28 | 25 | the settings, one byte each (below) |
+| 53 | 3 | the EQ (FX page 2, since 4.06-beta; 0 before, which is the EQ off): below |
 | 56 | 16 | steps 1 to 16: 1 on, 0 off (only the first "steps in the pattern" play) |
 | 72 | 16 | each step's MIDI note (60 is middle C; a hit ignores it) |
 | 88 | 8 | the category as text, zero-padded: `DRUMS`, `BASS`, `KEYS`, `PAD`, `LEAD`, `FX`, `MY`, `LOOP`, or empty |
@@ -258,6 +259,16 @@ The 25 settings, in order (signed ones are two's complement):
 | 22 | FX slot B, the same | 0 to 9 |
 | 23 | FX A's knob: −3 to 3 off; left and right are the effect's two flavours | −53 to 53 |
 | 24 | FX B's knob | −53 to 53 |
+
+**The EQ (since 4.06-beta)**, bytes 53 to 55: one 24-bit number, little-endian, of four fields, each two's
+complement. All 0 is the EQ off (the track sounds as without one); a firmware before 4.06-beta sends 0.
+
+| Bits | Field | Range |
+|---|---|---|
+| 0–4 | LOW: a low shelf under 150 Hz, dB (0 off) | −15 to 6 |
+| 5–9 | MID: a bell (Q 1) at MID FREQ, dB (0 off) | −15 to 6 |
+| 10–15 | MID FREQ: 1000 × 2^(n/6) Hz (157 Hz to 6.35 kHz; 0 is 1 kHz) | −16 to 16 |
+| 16–20 | HIGH: a high shelf over 5 kHz, dB (0 off) | −15 to 6 |
 
 ### 31 (hex 1F): LOOP INFO
 

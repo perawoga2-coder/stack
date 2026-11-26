@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.05-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.06-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -49,6 +49,9 @@ group and the place, for example `KEYS 3/15`.
 
 Tracks 1 to 6 start with a sound. Tracks 7 and 8 start EMPTY.
 
+All built-in sounds are equally loud. Since 4.06 the noises WIND and RAIN (FX) have no rumble under 150 Hz any more:
+before, they held more deep bass than any other sound, and it sat under the whole mix.
+
 ### SELECT: the tempo
 
 Turn the SELECT knob to change the tempo. One click is 1 BPM, from 40 to 240. The top of the screen shows the new
@@ -74,7 +77,8 @@ All eight tracks share the same pattern length. The length comes from the time s
 
 ![The FX page](img/fx.png)
 
-Press FX to open the page. Press FX again to go back. Each track has two effect slots, A and B.
+Press FX to open the page. Press FX again for page 2, the EQ (below). Press FX once more to go back to the tracks.
+Each track has two effect slots, A and B.
 
 | Knob | What it does |
 |---|---|
@@ -94,6 +98,23 @@ Press FX to open the page. Press FX again to go back. Each track has two effect 
 | OVERDRIVE | WARM | FUZZ |
 | CHORUS | WIDE | WOBBLE |
 | LO-FI | VINYL | 8-BIT |
+
+## FX, page 2: EQ
+
+![FX page 2: the EQ](img/eq.png)
+
+Press FX twice to open the EQ: three bands that make the track's low, middle and high louder or softer. Each track
+has its own. It works on everything the track plays: your keys, its steps and the loop on T8L or T7L.
+
+| Knob | What it does |
+|---|---|
+| K1 LOW | The lows, under about 150 Hz: −15 to +6 dB. |
+| K2 MID | The middle, around MID FREQ: −15 to +6 dB. |
+| K3 MID FREQ | Where the middle is: 160 Hz to 6300 Hz. It starts at 1000 Hz. |
+| K4 HIGH | The highs, over about 5000 Hz: −15 to +6 dB. |
+
+0 dB is off. When all three are at 0 dB the track sounds exactly as without an EQ. The EQ comes after the FILTER and
+before the effects. SAVE keeps it. A song saved before 4.06 loads with the EQ off.
 
 ## ENV
 
@@ -223,7 +244,8 @@ happen when you let go.
 - **The sound of the loop.** To hold 8 seconds, the loop is stored compressed. You can hear a little noise with
   the sound, most on bright sounds and cymbals. Bass and soft sounds stay clean.
 - Only what you play by hand is recorded. The sequencer's own steps are not recorded.
-- The loop records your playing with its effects, as you hear it: the track's FILTER, FX, LFO and ENV (not PERFORM).
+- The loop records your playing with its effects, as you hear it: the track's FILTER, EQ, FX, LFO and ENV (not
+  PERFORM).
 - **The loop moves between track 8 and track 7.** The first layer goes to track 8: it shows T8L. Each time a layer
   is in the loop, the loop moves to the other track: 8, then 7, then 8 again, and so on. The screen says
   `LOOP -> T7` (or `LOOP -> T8`). The music does not stop and there is no gap. Your selected track stays selected.
@@ -235,7 +257,7 @@ happen when you let go.
 - If the selected track is the one that holds the loop (T8L or T7L), the keys are silent and the screen says
   `SELECT ANOTHER`. Select another track to play.
 - The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
-  at 80, as loud as you played it. The FILTER, FX and LFO of the track that holds the loop work on the loop.
+  at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.
 - A layer on top is only kept when you let go of REC within half a second. If you hold REC longer, that layer is
   dropped and the loop stays as it was. So holding REC to remove a layer never records anything.
 - If you hold the REC press that ends a layer for 3 seconds, the layer you just made is removed again.
@@ -348,7 +370,7 @@ tempo, the time signature, the swing, and the loop (and which track holds it, 7 
 
 Press SAVE to save your song. The screen says `SAVED`.
 
-What is saved: every track's sound and knobs, FX, ENV, LFO, EDIT, ARP, the steps and their notes, the tempo, the
+What is saved: every track's sound and knobs, FX, EQ, ENV, LFO, EDIT, ARP, the steps and their notes, the tempo, the
 time signature, the swing, and Bluetooth on or off.
 
 What is **not** saved: the loop, and the samples themselves. Tracks 7 and 8 are saved with their own sounds,

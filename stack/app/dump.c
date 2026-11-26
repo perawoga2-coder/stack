@@ -104,6 +104,10 @@ static void dump_make(void)
             p[56u + i] = step_on[t][i] ? 1u : 0u;
             p[72u + i] = step_note[t][i];
         }
+        i = eq_word(t);                      /* the EQ (4.06): the three bytes after the settings, 0 till then */
+        p[53] = (uint8_t)i;
+        p[54] = (uint8_t)(i >> 8);
+        p[55] = (uint8_t)(i >> 16);
     }
     put32(h + 10, ~dump_crc(0xFFFFFFFFu, dump_song + 16, DUMP_LEN - 16u));
 }

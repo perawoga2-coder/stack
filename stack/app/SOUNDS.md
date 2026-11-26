@@ -7,6 +7,8 @@ another firmware is in STACK. From Felucca only rendered audio is used, with cre
 69 sounds, 353.7 KiB: DRUMS 22, BASS 10, KEYS 15, PAD 7, LEAD 10, FX 5.
 Stored as IMA ADPCM (4 bits a sample) or, the single cycles, 16-bit PCM; mono. Every sound is brought to the same
 loudness (ITU-R BS.1770 K-weighting, the loudest 100 ms at -15.5 dB) with its own peak at -1.0 dBFS at most.
+The noises (WIND, RAIN) are first cut below 150 Hz (since 4.06): rendered down to DC, they held more
+under 40 Hz than any other sound, a rumble under the whole mix.
 
 | # | Category | Name | Source | Licence | File | Rate | Length |
 | --- | --- | --- | --- | --- | --- | --- | --- |

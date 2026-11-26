@@ -328,3 +328,67 @@ press SAVE
 wait 2300
 release SAVE
 wait 100
+# --- 4.06: the EQ (FX page 2) is kept, in the three bytes of a track's record that were 0 before: a song SAVE kept
+# before 4.06 comes back with no EQ (flat). Track 3 and track 1 with every field at an end (each sign packed)
+turn ALGO -8
+wait 40
+turn ALGO 2
+wait 40
+expect track 3
+expect eq1 0
+tap FX
+wait 40
+tap FX
+wait 40
+expect page 9
+spin K1 -7
+spin K2 4
+spin K3 -5
+spin K4 3
+wait 40
+turn ALGO -2
+wait 40
+expect track 1
+spin K1 6
+spin K2 -15
+spin K3 16
+spin K4 -15
+wait 40
+expect eq1 6
+expect eq2 -15
+expect eq3 16
+expect eq4 -15
+shot save_eq.png
+tap FX
+wait 40
+tap SAVE
+wait 100
+reboot
+wait 2200
+turn ALGO -8
+wait 40
+expect track 1
+expect eq1 6
+expect eq2 -15
+expect eq3 16
+expect eq4 -15
+turn ALGO 1
+wait 40
+expect eq1 0
+expect eq2 0
+expect eq3 0
+expect eq4 0
+turn ALGO 1
+wait 40
+expect track 3
+expect eq1 -7
+expect eq2 4
+expect eq3 -5
+expect eq4 3
+# cleared: no EQ anywhere
+press SAVE
+wait 2300
+release SAVE
+wait 100
+expect eq1 0
+expect eq4 0
