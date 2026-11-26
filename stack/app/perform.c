@@ -86,13 +86,13 @@ static float perform_sends(const float *y, uint32_t n)
 {
     float dry = 1.0f;
     if (pf_g[PK_FLANGER] > 0.0f)
-        fx_send(FX_FLANGER, 1, pf_g[PK_FLANGER] * 0.8f, y, n);
+        fx_send(FX_FLANGER, 1, pf_g[PK_FLANGER] * 0.8f, y, n, 0);
     if (pf_g[PK_ROBOT] > 0.0f)
-        dry = fx_send(FX_ROBOT, 1, pf_g[PK_ROBOT] * 0.9f, y, n);
+        dry = fx_send(FX_ROBOT, 1, pf_g[PK_ROBOT] * 0.9f, y, n, 0);
     if (pf_g[PK_REVERB] > 0.0f)
-        fx_send(FX_REVERB, 1, pf_g[PK_REVERB] * 0.6f, y, n);
+        fx_send(FX_REVERB, 1, pf_g[PK_REVERB] * 0.6f, y, n, 0);
     if (pf_g[PK_ECHO] > 0.0f)
-        fx_send(FX_ECHO, 1, pf_g[PK_ECHO] * 0.65f, y, n);
+        fx_send(FX_ECHO, 1, pf_g[PK_ECHO] * 0.65f, y, n, 0);
     return dry;
 }
 

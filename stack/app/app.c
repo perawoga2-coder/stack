@@ -1024,6 +1024,7 @@ _Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
 #include "perform.c"                     /* PERFORM: SEL and a white key, an effect on everything */
 static float rb[APP_BLOCK];                  /* a track's voices that a take records (played by hand) */
 static float recf[NTRK][4];                  /* and the track's FILTER on them alone */
+static fx_slot_t recx[NTRK][2];              /* and its OVERDRIVE, LO-FI (4.05: the take hears the effects) */
 static void seq_start_hook(void) { lp.bar = (uint8_t)(lp.bars - 1u); lp.resync = 1; }
 static uint8_t *lvl_of(uint32_t t) { return t == lp.trk && lp.own ? &lp.lvl : &trk[t].level; }   /* LEVEL: the loop has its own */
 
@@ -1129,13 +1130,14 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         arp_block(n);
     for (i = 0; i < n; i++)
         mixl[i] = mixr[i] = rec_in[i] = 0.0f;
+    fx_rec = (uint8_t)take;
     for (t = 0; t < NTRK; t++) {
         const sound_t *s = list_sound(trk[t].sound);
         int32_t f = trk[t].filt;
         float kd = (float)trk[t].decay, lv = (float)*lvl_of(t) * 0.01f;    /* (the loop's track: the loop's own) */
         float dcoef = 1.0f, rcoef, a_t = 1.0f, b_t = 0.0f, g_t = lv * lv, a = bus[t].a, b = bus[t].b, g = bus[t].gain;
         float lp1 = bus[t].lp1, lp2 = bus[t].lp2, hp1 = bus[t].hp1, hp2 = bus[t].hp2;
-        float fa[2], rate_t = 1.0f, dry = 1.0f;
+        float fa[2], rate_t = 1.0f, dry = 1.0f, dfx;
         float lfo_p0 = 0.0f, lfo_dp = 0.0f, lfo_d = 0.0f, lfo_v = 0.0f, pan_t = 0.0f;   /* the LFO this block */
         uint32_t lfo_on = trk[t].lfo_a != 0u, lfo_to = trk[t].lfo_t, lfo_sh = trk[t].lfo_s;
         env_t ev;
@@ -1267,8 +1269,10 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
 #endif
                 }
         }
-        if (!anyr)
+        if (!anyr) {
             recf[t][0] = recf[t][1] = recf[t][2] = recf[t][3] = 0.0f;
+            memset(recx[t], 0, sizeof recx[t]);
+        }
         if (!any && fm_fabsf(lp2) < 1e-6f && fm_fabsf(hp2) < 1e-6f) {
             bus[t].a = a_t;                  /* silent: nothing to filter, the knobs' values taken at once */
             bus[t].b = b_t;
@@ -1303,13 +1307,16 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             for (i = 0; i < n; i++)
                 tb[i] += rb[i];
         for (q = 0; q < 2u; q++)                 /* OVERDRIVE and LO-FI: on the track itself, slot A then B */
-            if (ft[q] == FX_DRIVE || ft[q] == FX_LOFI)
+            if (ft[q] == FX_DRIVE || ft[q] == FX_LOFI) {
                 fx_inline(ft[q], fs[q], fa[q], &fx_slot[t][q], tb, n);
+                if (anyr)                        /* (and on the take's part alone: they are not linear) */
+                    fx_inline(ft[q], fs[q], fa[q], &recx[t][q], rb, n);
+            }
         for (i = 0; i < n; i++) {                /* LEVEL */
             g += (g_t - g) * 0.004f;
             tb[i] *= g;
             if (anyr)
-                rec_in[i] += rb[i] * g;          /* the take hears it here: after LEVEL, before the effects */
+                rb[i] *= g;
         }
         if (city_on) {                           /* the city view is up: this track's level for its sign */
             float pk = 0.0f;
@@ -1320,7 +1327,8 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         }
         for (q = 0; q < 2u; q++)                 /* the shared effects: this track's part into their buses */
             if (FX_BUS[ft[q]] >= 0)
-                dry *= fx_send(ft[q], fs[q], fa[q], tb, n);
+                dry *= fx_send(ft[q], fs[q], fa[q], tb, n, anyr ? rb : 0);
+        dfx = dry;                               /* (the take hears the track's effects, not PERFORM's) */
         if (pf_run)                              /* PERFORM's sends: every track's, as much as its keys say */
             dry *= perform_sends(tb, n);
         if (pan_t != 0.0f || bus[t].pan != 0.0f) {   /* the LFO's PAN: the side it leaves is turned down, to nothing at 100 */
@@ -1330,6 +1338,8 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
                 pn += (pan_t - pn) * 0.004f;
                 mixl[i] += pn > 0.0f ? x * (1.0f - pn) : x;
                 mixr[i] += pn < 0.0f ? x * (1.0f + pn) : x;
+                if (anyr)                        /* (the take: left and right as one) */
+                    rec_in[i] += rb[i] * dfx * (pn > 0.0f ? 1.0f - 0.5f * pn : 1.0f + 0.5f * pn);
             }
             bus[t].pan = pan_t == 0.0f && pn < 0.0005f && pn > -0.0005f ? 0.0f : pn;
         } else {
@@ -1338,6 +1348,8 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
             mixl[i] += x;
             mixr[i] += x;
         }
+        for (i = 0; anyr && i < n; i++)
+            rec_in[i] += rb[i] * dfx;
         }
         bus[t].a = a;
         bus[t].b = b;
@@ -1352,8 +1364,10 @@ static void render_part(int32_t *lr, uint32_t n, float gain)
         const float sf = ck_tick_frames() * 6.0f, d = sf - fx_sf;
         if (d > fx_sf * 0.003f || -d > fx_sf * 0.003f)
             fx_sf = sf;
-        fx_buses(mixl, mixr, n, fx_sf);
+        fx_buses(mixl, mixr, n, fx_sf, take ? rec_in : 0, tb);
     }
+    /* what a take hears is whole only now (the effects are shared): the looper takes this block's in the next (4.05) */
+    memcpy(rec_pv, rec_in, sizeof rec_pv);
     if (pf_run) {                                /* PERFORM: its effects on the whole mix */
         int32_t boff = -1;
         if (seq_running && seq_dphase > 0.0f) {  /* where in this block a step starts (the straight grid) */
@@ -3493,6 +3507,21 @@ int app_expect(const char *what, int *got)
         *got = lp.div == 4u ? 11 : 22;
     else if (!strcmp(what, "loop_bars"))     /* the bars it is long */
         *got = lp.bars;
+    else if (!strncmp(what, "loop_db", 7)) { /* loop_dbA_B: the loop's loudest from A to B ms after its first sample, in dB */
+        unsigned a = 0, b = 0;
+        uint32_t len = lp.has ? lp.total / 2u : 0u, k;
+        int32_t pk = 0, v;
+        lcodec_t c = {LOOP_B(lp.cur), 0, 0, 0};
+        sscanf(what + 7, "%u_%u", &a, &b);
+        for (k = 0; k < len; k++) {
+            v = lc_dec(&c, len);
+            v = v < 0 ? -v : v;
+            if (k * 1000u >= a * 22050u && k * 1000u < b * 22050u && v > pk)
+                pk = v;
+        }
+        *got = pk ? (int)(6.0206f * fm_log2f((float)pk / 32768.0f) - 0.5f) : -99;
+        printf("  loop: loudest %d dBFS from %u to %u ms\n", *got, a, b);
+    }
     else if (!strcmp(what, "env_a"))         /* the selected track's ATTACK, RELEASE (-1 AUTO), SUSTAIN, VELOCITY */
         *got = trk[ui.sel].env_a;
     else if (!strcmp(what, "env_r"))

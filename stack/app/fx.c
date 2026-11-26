@@ -129,7 +129,9 @@ static struct {
     float lp, y0, y1, ph;                /* a filter, the last output (for the lower rates), an LFO */
     float c[4];                          /* the reverb's comb filters */
     uint16_t at[6];                      /* the reverb's six lines' places */
+    float ea, et;                        /* a take: how much went in of late, from everyone and from the playing taken */
 } fxb[NBUS];
+static uint8_t fx_rec;                   /* a take runs: the sends are weighed (fx_send), for its share of each bus */
 
 static inline float m_get(const int16_t *m, uint32_t i) { return (float)m[i] * (1.0f / 16384.0f); }
 static inline void m_put(int16_t *m, uint32_t i, float v)
@@ -233,13 +235,23 @@ static inline float m_tap(const int16_t *m, uint32_t mask, uint32_t w, float d)
     return a + (c - a) * f;
 }
 
-/* every bus that is fed or still sounding, into the mix; then each is ready for the next block's input */
-static void fx_buses(float *l, float *r, uint32_t n, float step_frames)
+/* every bus that is fed or still sounding, into the mix; then each is ready for the next block's input. rec (a take
+ * runs): each bus's share of what went in of late that is the playing taken (4.05: 1 when it alone feeds the bus),
+ * of what the bus gives, mono, added to it; tmp a block to work in */
+static void fx_buses(float *l, float *r, uint32_t n, float step_frames, float *rec, float *tmp)
 {
     uint32_t b, i;
     for (b = 0; b < NBUS; b++) {
-        float d, peak = 0.0f;
+        float d, peak = 0.0f, s = 0.0f;
         const float *in = bus_in[b];
+        if (!rec) {
+            fxb[b].ea = fxb[b].et = 0.0f;
+        } else {                                 /* (both fall alike, ~0.6 s: the share holds while a tail rings) */
+            if (fxb[b].et > 0.0f)
+                s = fxb[b].et >= fxb[b].ea ? 0.5f : 0.5f * fxb[b].et / fxb[b].ea;
+            fxb[b].ea = fm_flush(fxb[b].ea * 0.99f);
+            fxb[b].et = fm_flush(fxb[b].et * 0.99f);
+        }
         if (fxb[b].fed)
             fxb[b].depth += (fxb[b].want - fxb[b].depth) * 0.25f;   /* (nobody feeds it: its tail keeps its strength) */
         if (!fxb[b].fed && !fxb[b].awake)
@@ -248,6 +260,9 @@ static void fx_buses(float *l, float *r, uint32_t n, float step_frames)
         if (!fxb[b].fed)
             for (i = 0; i < n; i++)
                 bus_in[b][i] = 0.0f;
+        if (s > 0.0f)
+            for (i = 0; i < n; i++)
+                tmp[i] = l[i] + r[i];
         switch (b) {
         case BUS_DLY:                            /* a slap: one clear repeat 100 ms on, a few more the further left */
             peak = bus_line(b, m_dly0, 2304, DLY_SLAP, 0.12f + 0.38f * d, 0.85f, 2, 1.0f, l, r, n);
@@ -365,14 +380,18 @@ static void fx_buses(float *l, float *r, uint32_t n, float step_frames)
             break;
         }
         }
+        if (s > 0.0f)                            /* (what this bus added: the mix after it, less the mix before) */
+            for (i = 0; i < n; i++)
+                rec[i] += s * (l[i] + r[i] - tmp[i]);
         fxb[b].awake = (uint8_t)(fxb[b].fed || peak > 0.0002f);
         fxb[b].fed = 0;
         fxb[b].want = 0.0f;
     }
 }
 
-/* a track's block y (after its LEVEL) into the bus of an effect: how much, and how much of the track's own sound stays */
-static float fx_send(uint32_t type, uint32_t side, float a, const float *y, uint32_t n)
+/* a track's block y (after its LEVEL) into the bus of an effect: how much, and how much of the track's own sound stays.
+ * ty: the part of y a take records (0: none), weighed against all that goes in while a take runs (fx_buses) */
+static float fx_send(uint32_t type, uint32_t side, float a, const float *y, uint32_t n, const float *ty)
 {
     static const float SEND[NFX][2] = {{0, 0}, {0.85f, 0.80f}, {0.90f, 0.85f}, {0.80f, 0.75f}, {0, 0}, {1.0f, 1.0f},
                                        {1.0f, 1.0f}, {0, 0}, {0.65f, 0.9f}, {0, 0}};
@@ -387,6 +406,15 @@ static float fx_send(uint32_t type, uint32_t side, float a, const float *y, uint
         fxb[b].want = a;
     for (i = 0; i < n; i++)
         in[i] += y[i] * g;
+    if (fx_rec) {
+        float e = 0.0f, et = 0.0f;
+        for (i = 0; i < n; i++)
+            e += fm_fabsf(y[i]);
+        for (i = 0; ty && i < n; i++)
+            et += fm_fabsf(ty[i]);
+        fxb[b].ea += e * g;
+        fxb[b].et += et * g;
+    }
     return type == FX_ROBOT ? (side ? 1.0f - a : 1.0f - 0.6f * a) : 1.0f;    /* ROBOT takes the sound's place */
 }
 

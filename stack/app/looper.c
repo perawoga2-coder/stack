@@ -9,8 +9,10 @@
  * is track 8's again (app_frame).
  *
  * A loop is a whole number of bars (passes of the pattern) long, so it stays in time with the steps; it need not start
- * on a bar line. It holds what was played by hand (render_part's rec_in: the live voices, before the effects, mono),
- * a layer at a time. Nothing here touches the flash.
+ * on a bar line. It holds what was played by hand (render_part's rec_in: the live voices as their track sends them to
+ * the mix, its FILTER, effects, LFO and ENV, mono; since 4.05), a layer at a time. Nothing here touches the flash.
+ * The shared effects run after every track, so a block's rec_in is whole only at its end: a take hears it a block
+ * late (rec_pv) and lays it REC_LAG frames earlier, where it was played.
  *
  * A take starts the moment REC goes down (since 4.03: nothing waits for a bar).
  *  - The first layer: recorded from the press on. REC again: the loop is the recorded time rounded to the nearest
@@ -115,7 +117,9 @@ static struct {
     lcodec_t rd, we;                     /* the take's coder: the loop that plays read, the other block written */
 } lp = {.div = 2, .bars = 1, .trk = 7, .lvl = 80};
 
-static float rec_in[APP_BLOCK];              /* what is played by hand this block (render_part) */
+static float rec_in[APP_BLOCK];              /* what is played by hand this block, as it is heard (render_part) */
+static float rec_pv[APP_BLOCK];              /* and the block before: what a take takes (REC_LAG) */
+#define REC_LAG APP_BLOCK                    /* frames a take hears the playing late: it is laid that much earlier in the loop */
 
 /* a pattern of `frames` frames: 2 a bar of it fits a block (at 22.05 kHz), 0 it does not */
 static uint32_t looper_fit(uint32_t frames)
@@ -322,7 +326,7 @@ static void loop_first_close(uint32_t want, uint32_t bars, uint32_t p)
     lp.total = want;
     lp.bars = (uint8_t)bars;
     loop_take_in();
-    lp.frame = lp.tk >= want ? (lp.tk - want) % want : 0u;
+    lp.frame = (lp.tk + REC_LAG) % want;     /* (its first sample is the playing REC_LAG frames before REC went down) */
     lp.fr = 0.0f;
     lp.bar = 0;
     lp.off = (lp.frame + want - p % want) % want;
@@ -372,11 +376,14 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
                 lp.we.k = 0;
                 lp.we.pred = lp.we.idx = 0;
             }
-        } else {                                 /* a layer on top: gathered from here; written once REC is let go */
+        } else {                                 /* a layer on top: gathered from here (laid from where the loop was
+                                                  * REC_LAG frames ago: the playing it hears now); written once REC is let go */
+            const uint32_t f0 = (lp.frame + lp.total - REC_LAG % lp.total) % lp.total;
             lp.state = LP_PRE;
             lp.cap = 1;
             lp.first = 0;
-            lp.k0 = lp.capk = lp.frame / 2u < lp.total / 2u ? lp.frame / 2u : 0u;
+            lp.capk = lp.frame / 2u;
+            lp.k0 = f0 / 2u < lp.total / 2u ? f0 / 2u : 0u;
             lp.b0 = lp.k0 / LB;
             lp.ncap = 0;
             lp.nmax = lp.total / 2u - (lp.k0 & (LB - 1u));
@@ -391,8 +398,8 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
             b = b < 1u ? 1u : b > maxb ? maxb : b;
             lp.bars = (uint8_t)b;
             lp.want = steer ? (uint32_t)((float)b * barf + 0.5f) & ~1u : b * pat;
-        } else if (lp.end_in > 441.0f) {
-            lp.end_in = 441.0f;
+        } else if (lp.end_in > 441.0f + (float)REC_LAG) {
+            lp.end_in = 441.0f + (float)REC_LAG;
         }
     } else if (q == LQ_UNDO && lp.state == LP_IDLE && lp.undo && !lp.fading) {
         lp.fading = 1;
@@ -524,7 +531,7 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
             float g = lp.tk < 220u ? (float)lp.tk * (1.0f / 220.0f) : 1.0f;
             if (lp.end_in < 441.0f)
                 g *= lp.end_in > 0.0f ? lp.end_in * (1.0f / 441.0f) : 0.0f;
-            lp.acc += rec_in[i] * g;
+            lp.acc += rec_pv[i] * g;
             lp.accn++;
         }
         if (steer && lp.total) {

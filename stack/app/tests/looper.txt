@@ -78,7 +78,9 @@ expect loop_state 0
 expect loop_layers 1
 expect loop_bars 1
 expect loop_total 88200
-expect loop_off 0
+# (4.05: the take hears the playing with its effects, a block late: its first sample is 256 frames before the
+# press, so bar 1 starts 256 frames into the loop)
+expect loop_off 256
 # the take is in: the loop moved to track 7 (T7L) at once, the screen says LOOP -> T7. Track 8 slept under the take
 # and has its sound and step again; track 7's sleep now (it sounded in bar 1)
 expect loop_trk 7
@@ -644,6 +646,76 @@ peakreset
 wait 2100
 expect peak_db_min -40
 wavstop
+# --- 4.05: a take records the playing with its track's effects, as it is heard. A short note on track 5 (the
+# piano), dry: the loop is silent after it. With REVERB on HALL, all the way: the hall's tail is in the loop too
+press REC
+wait 5200
+release REC
+wait 200
+expect loop_has 0
+turn ALGO 4
+wait 60
+expect track 5
+expect fxa 0
+wav looper_fx_dry.wav
+tap REC
+wait 30
+expect loop_state 2
+key 7 down 100
+wait 100
+key 7 up
+wait 1700
+tap REC
+wait 700
+expect loop_layers 1
+expect loop_bars 1
+expect loop_db0_400 >-30
+expect loop_db1000_1900 <-70
+wait 2000
+wavstop
+press REC
+wait 5200
+release REC
+wait 200
+expect loop_has 0
+tap FX
+wait 60
+turn K1 3
+wait 30
+expect fxa 3
+turn K2 60
+wait 30
+expect fxak 53
+tap FX
+wait 60
+wav looper_fx_reverb.wav
+tap REC
+wait 30
+expect loop_state 2
+key 7 down 100
+wait 100
+key 7 up
+wait 1700
+tap REC
+wait 700
+expect loop_layers 1
+expect loop_bars 1
+expect loop_db0_400 >-30
+expect loop_db1000_1900 >-45
+wait 2000
+wavstop
+tap FX
+wait 60
+turn K2 -53
+turn K1 -3
+wait 30
+expect fxa 0
+expect fxak 0
+tap FX
+wait 60
+turn ALGO -4
+wait 60
+expect track 1
 # under a clock in the tempo is the clock's: SELECT changes nothing, and says who leads
 clock 60 20
 expect clk_follow 1

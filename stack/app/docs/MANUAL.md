@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.04-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.05-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -223,6 +223,7 @@ happen when you let go.
 - **The sound of the loop.** To hold 8 seconds, the loop is stored compressed. You can hear a little noise with
   the sound, most on bright sounds and cymbals. Bass and soft sounds stay clean.
 - Only what you play by hand is recorded. The sequencer's own steps are not recorded.
+- The loop records your playing with its effects, as you hear it: the track's FILTER, FX, LFO and ENV (not PERFORM).
 - **The loop moves between track 8 and track 7.** The first layer goes to track 8: it shows T8L. Each time a layer
   is in the loop, the loop moves to the other track: 8, then 7, then 8 again, and so on. The screen says
   `LOOP -> T7` (or `LOOP -> T8`). The music does not stop and there is no gap. Your selected track stays selected.
