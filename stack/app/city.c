@@ -1,21 +1,21 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Maker Hip */
-/* STACK: the face view (since 4.11-beta: it took the city view's place; its name in the code stays "city").
- * Written for STACK. Part of the unity build: included by app.c.
+/* STACK: the mushroom view (since 4.12-beta; 4.11-beta showed a face, before it a city; its name in the code stays
+ * "city"). Written for STACK. Part of the unity build: included by app.c.
  *
- * Maker Hip's own face drawn in characters on a black ground with an olive dot grid (face_data.h, from the owner's
- * photos): the hair and the shoulders as an outline of small marks, the face in letters of STACK's words and #. It
- * talks with the sound: the master's level picks one of five mouths, closed to wide open (the loudest with the eyes
- * wide too). Around it six little equalizers, one for each group of sounds in the group's own colour (KICK sky blue,
- * SNARE pink, HI-HAT red, BASS green, MELODY yellow, SOUND purple): the louder, the taller, and a new hit flashes
+ * Psychedelic mushrooms drawn in characters on a black ground with an olive dot grid (view_data.h), as on STACK's
+ * cover: the caps' letters and outlines in rings of the rainbow from each cap's middle, cream spots, the stems in
+ * STACK's words. The rainbow turns with the sound: the louder the master, the faster its rings move outwards; silent,
+ * it stands still. Around them six little equalizers, one for each group of sounds in the group's own colour (KICK sky
+ * blue, SNARE pink, HI-HAT red, BASS green, MELODY yellow, SOUND purple): the louder, the taller, and a new hit flashes
  * white. Across the top: STACK, the version, the tempo.
  *
- * It is drawn once when the view opens (three times, brighter each: it fades in); after that only the six equalizers,
- * the face when its mouth changes and the tempo when it changes, each in a small canvas of its own, twenty times a
- * second. It runs in the main loop, where the screen always is: the sound and the keys are not held up by it (the
- * tracks' levels come from the audio interrupt as one number each). */
+ * It is drawn once when the view opens (three times, brighter each: it fades in); after that the six equalizers, the
+ * caps when the rainbow moves (ten times a second at most) and the tempo when it changes, each in a small canvas of its
+ * own. It runs in the main loop, where the screen always is: the sound and the keys are not held up by it (the tracks'
+ * levels come from the audio interrupt as one number each). */
 
-#include "face_data.h"
+#include "view_data.h"
 enum { G_KICK, G_SNARE, G_HAT, G_BASS, G_MELODY, G_SOUND, NGRP };
 #define CITY_EDGE 14u                        /* the master's level in so many steps */
 static struct {
@@ -27,7 +27,9 @@ static struct {
     uint32_t flashes;                        /* (the simulator's checks) */
     float mv[2];                             /* the master's, left and right */
     uint8_t edge[2];                         /* the master's level, left and right, in 14 steps (255: not yet) */
-    uint8_t mouth;                           /* the mouth drawn (255: not yet) */
+    uint8_t glow;                            /* how fast the rainbow turns: 0 still .. 4 (the master's level) */
+    uint8_t phase;                           /* the rainbow's turn, 0 .. 6 */
+    uint32_t spin_t;                         /* when it last moved */
     uint16_t bpm;                            /* the tempo drawn */
 } city;
 
@@ -38,8 +40,6 @@ static const uint8_t CITY_EQ[NGRP][2] = {{6, 46}, {222, 46}, {6, 127}, {222, 118
 
 /* a colour at brightness f, 0 .. 256 (the fade-in) */
 static inline uint16_t city_rgb(uint32_t r, uint32_t g, uint32_t b, uint32_t f) { return RGB(r * f >> 8, g * f >> 8, b * f >> 8); }
-#define FACE_YEL(f) city_rgb(236, 204, 70, f)
-#define FACE_DIM(f) city_rgb(170, 146, 52, f)
 static inline uint32_t city_hash(uint32_t a) { a ^= a >> 7; a *= 0x9E3779B1u; return a ^ a >> 15; }
 
 /* the group a track's sound belongs to (-1: none, an EMPTY track). The drums by their names: KICK and the toms (the low
@@ -71,11 +71,8 @@ static int32_t city_group(uint32_t t)
     return G_SOUND;
 }
 
-/* the small letters the outline is drawn in: o c e i n s k t, 3 x 4 px each, a bit a pixel (rows of 3, the lowest
- * bit the leftmost) */
-static const uint16_t FACE_MARK[8] = {0x56A, 0xC4E, 0xC7A, 0x482, 0xB58, 0x79E, 0xAE9, 0xCBA};
-static const char FACE_WORDS[] = "clock*anything*stack*rec*play*one*loop*eight*tracks*maker*hip*sync*tape*";
-static const char FACE_SPECK[4] = {'.', ',', '\'', ':'};
+static const char VIEW_WORDS[] = "clock*anything*stack*rec*play*one*loop*eight*tracks*maker*hip*sync*tape*";
+static const uint8_t VIEW_BOW[7][3] = {{255, 60, 60}, {255, 150, 40}, {250, 230, 50}, {70, 230, 90}, {50, 200, 255}, {90, 110, 255}, {200, 80, 255}};
 
 /* the dot grid, the box x0, y0, w, h of it, into a canvas whose top left is ox, oy on the screen */
 static void face_dots(int32_t x0, int32_t y0, int32_t w, int32_t h, int32_t ox, int32_t oy, uint32_t f)
@@ -87,19 +84,41 @@ static void face_dots(int32_t x0, int32_t y0, int32_t w, int32_t h, int32_t ox, 
                 cv_rect(x - ox, y - oy, 1, 1, city_rgb(92, 84, 36, f));
 }
 
-/* the face, mouth m, into a canvas whose top left is ox, oy on the screen */
-static void face_cells(uint32_t m, int32_t ox, int32_t oy, uint32_t f)
+/* the mushrooms' rows r0 .. r1 - 1, the rainbow at turn ph, straight onto the screen in canvases of 8 rows */
+static void view_rows(int32_t r0, int32_t r1, uint32_t ph, uint32_t f)
 {
-    uint32_t i, k = 0;
-    char c[2] = {0, 0};
-    for (i = 0; i < FACE_CW * FACE_CH; i++) {
-        const uint32_t v = FACE_CELLS[m][i >> 2] >> ((i & 3u) * 2u) & 3u, h = city_hash(i * 31u + m);
-        const int32_t x = 78 - ox + (int32_t)(i % FACE_CW) * 6, y = 90 + (int32_t)(i / FACE_CW) * 9 - oy;
-        if (!v)
-            continue;
-        c[0] = v == 1u ? '#' : v == 2u ? FACE_WORDS[k++ % (sizeof FACE_WORDS - 1u)] : FACE_SPECK[h & 3u];
-        cv_rect(x, y, 6, 9, C_BLACK);
-        cv_text(x, y - 3, &FONT_XS, c, v == 3u || (v == 2u && h & 16u) ? FACE_DIM(f) : FACE_YEL(f));
+    int32_t b;
+    for (b = r0; b < r1; b += 8) {
+        const int32_t n = r1 - b < 8 ? r1 - b : 8, oy = 9 + b * 9;
+        uint32_t i, k = 0;
+        char ch[2] = {0, 0};
+        cv_begin(192, (uint32_t)n * 9u, C_BLACK);
+        face_dots(24, oy, 192, n * 9, 24, oy, f);
+        for (i = 0; i < VIEW_C * (uint32_t)(b + n); i++) {
+            const uint32_t v = VIEW_CELLS[i >> 1] >> ((i & 1u) * 4u) & 15u;
+            const int32_t c = (int32_t)(i % VIEW_C), r = (int32_t)(i / VIEW_C), x = c * 6, y = (r - b) * 9;
+            uint32_t j, d = 0xFFFFu;
+            uint16_t col = city_rgb(240, 232, 204, f);
+            if (v == 2u || v == 4u)
+                k++;                             /* (the words run on from the top, whichever rows are drawn) */
+            if (!v || r < b)
+                continue;
+            for (j = 0; j < 3u; j++) {           /* the nearest cap's middle: its rings */
+                const int32_t dc = c - VIEW_CAP[j][0], dr = r - VIEW_CAP[j][1];
+                const uint32_t e = (uint32_t)(dc * dc + 3 * dr * dr);
+                d = e < d ? e : d;
+            }
+            if (v <= 2u) {
+                const uint8_t *bw = VIEW_BOW[(d / 10u + 7u - ph) % 7u];
+                col = city_rgb(bw[0], bw[1], bw[2], f);
+            } else if (v == 5u) {
+                col = city_rgb(64, 200, 190, f);
+            }
+            ch[0] = v == 1u ? '#' : v == 3u ? 'o' : v == 5u ? ':' : VIEW_WORDS[(k - 1u) % (sizeof VIEW_WORDS - 1u)];
+            cv_rect(x, y, 6, 9, C_BLACK);
+            cv_text(x, y - 3, &FONT_XS, ch, col);
+        }
+        cv_blit(24, (uint32_t)oy);
     }
 }
 
@@ -120,36 +139,21 @@ static void face_top(int32_t oy, uint32_t f)  /* STACK, the version, the tempo *
     cv_text(236 - text_w(&FONT_T, t), 1 - oy, &FONT_T, t, city_rgb(238, 230, 198, f));
 }
 
-static void city_scene(uint32_t f)           /* the whole picture: three bands */
+static void city_scene(uint32_t f)           /* the whole picture: the dots and the top in three bands, then the mushrooms */
 {
-    int32_t y0, x, y;
+    int32_t y0;
     city.bpm = (uint16_t)(44100.0f * 15.0f / seq_sf + 0.5f);
     for (y0 = 0; y0 < 240; y0 += 80) {
-        uint32_t k = (uint32_t)y0 * 7u;
         cv_begin(240, 80, C_BLACK);
         face_dots(0, 12, 240, 228, 0, y0, f);
-        for (y = 0; y < FACE_OH; y++)        /* the outline */
-            for (x = 0; x < FACE_OW; x++)
-                if (FACE_OUT[y][x >> 3] >> (x & 7) & 1u) {
-                    const uint32_t mk = FACE_MARK[city_hash((uint32_t)(y * 64 + x)) & 7u], h = city_hash(k++);
-                    const int32_t px = 24 + x * 3, py = 9 + y * 5 - y0;
-                    uint32_t b;
-                    if (py < -5 || py > 80)
-                        continue;
-                    cv_rect(px, py, 3, 5, C_BLACK);
-                    for (b = 0; b < 12u; b++)
-                        if (mk >> b & 1u)
-                            cv_rect(px + (int32_t)(b % 3u), py + (int32_t)(b / 3u), 1, 1, h & 8u ? FACE_DIM(f) : FACE_YEL(f));
-                }
-        face_cells(0, 0, y0, f);
         if (!y0)
             face_top(0, f);
         cv_blit(0, (uint32_t)y0);
     }
-    city.mouth = 0;
+    view_rows(1, VIEW_R, city.phase, f);     /* (row 0 is empty: the top line is over it) */
 }
 
-static void city_lights(uint32_t now)        /* the six equalizers, the mouth and the tempo, as it sounds now */
+static void city_lights(uint32_t now)        /* the six equalizers, the rainbow and the tempo, as it sounds now */
 {
     float g[NGRP] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     const int32_t mine = city_group(ui.sel);
@@ -195,16 +199,15 @@ static void city_lights(uint32_t now)        /* the six equalizers, the mouth an
         lit = db <= -42.0f ? 0u : (uint32_t)((db + 42.0f) * (float)CITY_EDGE / 41.0f + 0.5f);    /* -42 dB .. -1 dB */
         city.edge[side] = (uint8_t)(lit > CITY_EDGE ? CITY_EDGE : lit);
     }
-    {   /* the mouth, from the louder side: closed when silent, wide open (the eyes too) near the top */
+    {   /* the rainbow turns with the louder side: still when silent, faster as it gets louder */
         const uint32_t e = city.edge[0] > city.edge[1] ? city.edge[0] : city.edge[1];
-        const uint32_t m = !e ? 0u : e < 6u ? 1u : e < 9u ? 2u : e < 12u ? 3u : 4u;
+        const uint32_t g = !e ? 0u : e < 6u ? 1u : e < 9u ? 2u : e < 12u ? 3u : 4u;
         const uint16_t bpm = (uint16_t)(44100.0f * 15.0f / seq_sf + 0.5f);
-        if (m != city.mouth) {
-            city.mouth = (uint8_t)m;
-            cv_begin(96, 117, C_BLACK);
-            face_dots(78, 90, 96, 117, 78, 90, 256);
-            face_cells(m, 78, 90, 256);
-            cv_blit(78, 90);
+        city.glow = (uint8_t)g;
+        if (g && now - city.spin_t >= 500u / g) {        /* a step every 0.5 s .. 0.125 s */
+            city.spin_t = now;
+            city.phase = (uint8_t)((city.phase + 1u) % 7u);
+            view_rows(1, VIEW_R, city.phase, 256);        /* every row: the small cap and the outlines are low down */
         }
         if (bpm != city.bpm) {
             city.bpm = bpm;
