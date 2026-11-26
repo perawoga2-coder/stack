@@ -1,4 +1,4 @@
-# STACK in the host simulator: the city view (the tracks' levels as a street's signs).
+# STACK in the host simulator: the face view (the city view till 4.10; the tracks' levels as equalizers, the mouth by the master).
 #   app/build/host/stack_host app/tests/city.txt app/build/host
 master 4096
 wait 2200
@@ -110,6 +110,8 @@ expect city_flashes >0
 # the kerbs' lights, left and right, run out with the master (the kick is in the middle: the same both sides)
 expect city_el >3
 expect city_er >3
+# the face talks: its mouth is open while the kick sounds
+expect city_mouth >0
 shot city_playing.png
 # the keys play on under it, and do not close it
 turn ALGO 0
@@ -209,6 +211,8 @@ wait 1500
 expect city_g0 0
 expect city_el 0
 expect city_er 0
+# silent: the mouth closed
+expect city_mouth 0
 shot city_stopped.png
 # a key played under it: its group's lamp lights (track 1, the kick)
 key w4 down 100

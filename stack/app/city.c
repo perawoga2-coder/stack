@@ -1,24 +1,23 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Maker Hip */
-/* STACK: the city view. Written for STACK. Part of the unity build: included by app.c.
+/* STACK: the face view (since 4.11-beta: it took the city view's place; its name in the code stays "city").
+ * Written for STACK. Part of the unity build: included by app.c.
  *
- * A city at night seen from the middle of its street, black and white, the buildings on both sides running to the
- * point where the street ends. The only colour is its lights. Six poles stand along the kerbs, three a side, near to
- * far: each carries a lamp that is the level meter of one group of sounds, in the group's own colour (KICK sky blue,
- * SNARE pink, HI-HAT red, BASS green, MELODY yellow, SOUND purple): the louder, the brighter and the more of the lamp
- * is lit, and a new hit flashes it white. The lights along the two kerbs are the master's meters, left and right:
- * they run from the far end towards the viewer, green, then yellow, then red.
+ * Maker Hip's own face drawn in characters on a black ground with an olive dot grid (face_data.h, from the owner's
+ * photos): the hair and the shoulders as an outline of small marks, the face in letters of STACK's words and #. It
+ * talks with the sound: the master's level picks one of five mouths, closed to wide open (the loudest with the eyes
+ * wide too). Around it six little equalizers, one for each group of sounds in the group's own colour (KICK sky blue,
+ * SNARE pink, HI-HAT red, BASS green, MELODY yellow, SOUND purple): the louder, the taller, and a new hit flashes
+ * white. Across the top: STACK, the version, the tempo.
  *
- * Nothing is stored: the city is worked out. A building's face is drawn two pixels at a time, its roof and its rows
- * of windows on lines that all meet at the street's end (240 x 240, the point at 120, 96). It is drawn once when the
- * view opens (three times, brighter each: it fades in); after that only the six lamps and the kerbs' lights that have
- * changed are drawn again, each in a small canvas of its own, twenty times a second. It runs in the main loop, where the screen always is: the sound
- * and the keys are not held up by it (the tracks' levels come from the audio interrupt as one number each). */
+ * It is drawn once when the view opens (three times, brighter each: it fades in); after that only the six equalizers,
+ * the face when its mouth changes and the tempo when it changes, each in a small canvas of its own, twenty times a
+ * second. It runs in the main loop, where the screen always is: the sound and the keys are not held up by it (the
+ * tracks' levels come from the audio interrupt as one number each). */
 
-#define CITY_VX 120
-#define CITY_VY 96
+#include "face_data.h"
 enum { G_KICK, G_SNARE, G_HAT, G_BASS, G_MELODY, G_SOUND, NGRP };
-#define CITY_EDGE 14u                        /* lights along a kerb */
+#define CITY_EDGE 14u                        /* the master's level in so many steps */
 static struct {
     uint8_t stage;                           /* 0 closed; 1 .. 3 fading in; 4 up */
     uint8_t manual;                          /* opened by HOME (it stays while stopped) */
@@ -27,15 +26,20 @@ static struct {
     uint32_t flash_t[NGRP];                  /* when its lamp last flashed white (0: not) */
     uint32_t flashes;                        /* (the simulator's checks) */
     float mv[2];                             /* the master's, left and right */
-    uint8_t edge[2];                         /* the lights lit along each kerb, as drawn (255: not drawn yet) */
+    uint8_t edge[2];                         /* the master's level, left and right, in 14 steps (255: not yet) */
+    uint8_t mouth;                           /* the mouth drawn (255: not yet) */
+    uint16_t bpm;                            /* the tempo drawn */
 } city;
 
-/* the poles, near to far, a side each by turns: the kerb's x they stand at (the right ones mirrored) */
-static const uint8_t CITY_POLE[NGRP] = {12, 30, 50, 66, 80, 92};
 /* the groups' colours, at full: sky blue, pink, red, bright green, yellow, purple */
 static const uint8_t CITY_RGB[NGRP][3] = {{80, 190, 255}, {255, 110, 190}, {255, 40, 40}, {60, 255, 70}, {255, 225, 40}, {180, 80, 255}};
+/* where each group's equalizer stands (its top left, px): three left of the face, three right */
+static const uint8_t CITY_EQ[NGRP][2] = {{6, 46}, {222, 46}, {6, 127}, {222, 118}, {12, 190}, {216, 190}};
 
-static inline uint16_t city_gray(uint32_t v, uint32_t f) { v = v * f >> 8; return RGB(v, v, v); }
+/* a colour at brightness f, 0 .. 256 (the fade-in) */
+static inline uint16_t city_rgb(uint32_t r, uint32_t g, uint32_t b, uint32_t f) { return RGB(r * f >> 8, g * f >> 8, b * f >> 8); }
+#define FACE_YEL(f) city_rgb(236, 204, 70, f)
+#define FACE_DIM(f) city_rgb(170, 146, 52, f)
 static inline uint32_t city_hash(uint32_t a) { a ^= a >> 7; a *= 0x9E3779B1u; return a ^ a >> 15; }
 
 /* the group a track's sound belongs to (-1: none, an EMPTY track). The drums by their names: KICK and the toms (the low
@@ -67,115 +71,85 @@ static int32_t city_group(uint32_t t)
     return G_SOUND;
 }
 
-/* pole g: its lamp's box, and (if wanted) its foot and its top. It stands on the kerb; the lamp hangs towards the
- * street. Everything is as large as it is near: d is its distance from the street's end, 28 .. 108 of 120 */
-static void city_pole(uint32_t g, int32_t *lx, int32_t *ly, int32_t *lw, int32_t *lh, int32_t *px, int32_t *foot, int32_t *top)
+/* the small letters the outline is drawn in: o c e i n s k t, 3 x 4 px each, a bit a pixel (rows of 3, the lowest
+ * bit the leftmost) */
+static const uint16_t FACE_MARK[8] = {0x56A, 0xC4E, 0xC7A, 0x482, 0xB58, 0x79E, 0xAE9, 0xCBA};
+static const char FACE_WORDS[] = "clock*anything*stack*rec*play*one*loop*eight*tracks*maker*hip*sync*tape*";
+static const char FACE_SPECK[4] = {'.', ',', '\'', ':'};
+
+/* the dot grid, the box x0, y0, w, h of it, into a canvas whose top left is ox, oy on the screen */
+static void face_dots(int32_t x0, int32_t y0, int32_t w, int32_t h, int32_t ox, int32_t oy, uint32_t f)
 {
-    const int32_t d = CITY_VX - CITY_POLE[g], right = (int32_t)(g & 1u);
-    const int32_t x = right ? 240 - CITY_POLE[g] : CITY_POLE[g], f = CITY_VY + d * 6 / 5, t = f - d * 3 / 2;
-    *lw = 3 + d / 9;
-    *lh = 6 + d * 2 / 5;
-    *lx = right ? x - d / 7 - *lw : x + d / 7;
-    *ly = t + d / 12;
-    if (px) {
-        *px = x;
-        *foot = f;
-        *top = t;
+    int32_t x, y;
+    for (y = 16 + (y0 > 16 ? (y0 - 16 + 8) / 9 * 9 : 0); y < y0 + h; y += 9)     /* on the screen's grid: 16 + 9k, 3 + 6k */
+        for (x = 3 + (x0 > 3 ? (x0 - 3 + 5) / 6 * 6 : 0); x < x0 + w; x += 6)
+            if (city_hash((uint32_t)(y / 18 * 64 + x / 30)) % 6u && city_hash((uint32_t)(y * 256 + x)) % 14u)
+                cv_rect(x - ox, y - oy, 1, 1, city_rgb(92, 84, 36, f));
+}
+
+/* the face, mouth m, into a canvas whose top left is ox, oy on the screen */
+static void face_cells(uint32_t m, int32_t ox, int32_t oy, uint32_t f)
+{
+    uint32_t i, k = 0;
+    char c[2] = {0, 0};
+    for (i = 0; i < FACE_CW * FACE_CH; i++) {
+        const uint32_t v = FACE_CELLS[m][i >> 2] >> ((i & 3u) * 2u) & 3u, h = city_hash(i * 31u + m);
+        const int32_t x = 78 - ox + (int32_t)(i % FACE_CW) * 6, y = 90 + (int32_t)(i / FACE_CW) * 9 - oy;
+        if (!v)
+            continue;
+        c[0] = v == 1u ? '#' : v == 2u ? FACE_WORDS[k++ % (sizeof FACE_WORDS - 1u)] : FACE_SPECK[h & 3u];
+        cv_rect(x, y, 6, 9, C_BLACK);
+        cv_text(x, y - 3, &FONT_XS, c, v == 3u || (v == 2u && h & 16u) ? FACE_DIM(f) : FACE_YEL(f));
     }
 }
 
-/* light j of a kerb (0 the farthest): where, and how large. The right kerb's mirrored */
-static void city_edge_at(uint32_t side, uint32_t j, int32_t *x, int32_t *y, int32_t *w)
+static void face_top(int32_t oy, uint32_t f)  /* STACK, the version, the tempo */
 {
-    static const uint8_t D[CITY_EDGE] = {9, 11, 13, 16, 19, 23, 28, 34, 41, 50, 60, 73, 88, 106};
-    const int32_t d = D[j], cx = CITY_VX - d + d / 6;      /* a little in from the kerb, on the road */
-    *w = 1 + d / 16;
-    *x = side ? 240 - cx - *w : cx;
-    *y = CITY_VY + d * 6 / 5 - d / 14;
-}
-
-/* the city itself into the canvas, the band that starts y0 down the picture; f: its brightness, 0 .. 256 */
-static void city_band(int32_t y0, uint32_t f)
-{
-    static const uint8_t EDGE[6] = {0, 46, 74, 92, 104, 114};        /* where each building starts, from the kerb in */
-    static const int8_t ROOF[2][5] = {{-60, 8, 34, 20, 58}, {-30, -6, 40, 50, 30}};   /* its roof at that edge */
-    int32_t side, x, k, t;
-    for (k = 0; k < 18; k++) {                                         /* the stars */
-        const uint32_t h = city_hash((uint32_t)k + 7u);
-        cv_rect((int32_t)(h % 240u), (int32_t)(h >> 8) % 90 - y0, 1, 1, city_gray(90u + (h >> 20) % 120u, f));
-    }
-    for (k = 0; k < 7; k++)                                            /* the towers at the street's end */
-        cv_rect(107 + k * 4, CITY_VY - 6 - (int32_t)(city_hash((uint32_t)k) % 14u) - y0, 3, 20, city_gray(k & 1 ? 46 : 70, f));
-    for (k = 1; k < 7; k++)                                            /* the street's middle line */
-        cv_rect(CITY_VX - (k + 1) / 2, 98 + k * k * 3 - y0, k + 1, k * 3, city_gray(150, f));
-    for (side = 0; side < 2; side++)
-        for (x = 0; x < 114; x += 2) {
-            const int32_t sx = side ? 238 - x : x, dx = CITY_VX - x;
-            int32_t b = 0, top, bot;
-            while (b < 4 && x >= EDGE[b + 1])
-                b++;
-            top = CITY_VY - (CITY_VY - ROOF[side][b]) * dx / (CITY_VX - EDGE[b]);
-            bot = CITY_VY + dx * 6 / 5;
-            cv_rect(sx, top - y0, 2, bot - top, city_gray(b & 1 ? 14 : 24, f));          /* the face */
-            cv_rect(sx, top - y0, 2, 1, city_gray(200, f));                              /* the roof's line */
-            cv_rect(sx, bot - 1 - y0, 2, 1, city_gray(120, f));                          /* the kerb */
-            if (x == EDGE[b]) {                                                          /* its near corner */
-                cv_rect(side ? sx + 1 : sx, top - y0, 1, bot - top, city_gray(170, f));
-                continue;
-            }
-            if ((x >> 1) % 3 == 2)
-                continue;                                                                /* (between two windows) */
-            for (k = -9; k < 9; k++) {                                                   /* its windows, row by row */
-                const int32_t wy = CITY_VY + (k * 13 + 6) * dx / CITY_VX;
-                const uint32_t h = city_hash((uint32_t)(side * 4000 + b * 400 + (k + 9) * 20 + x / 6));
-                if (wy <= top + 1 || wy >= bot - 4 || h % 5u > 1u)
-                    continue;
-                cv_rect(sx, wy - y0, 2, dx / 40 + 1, city_gray(h % 7u ? 96 : 230, f));
-            }
-        }
-    for (t = NGRP - 1; t >= 0; t--) {                                  /* the poles, the far ones first */
-        static const char *const INIT[NGRP] = {"K", "S", "H", "B", "M", "X"};
-        int32_t lx, ly, lw, lh, px, foot, top;
-        const int32_t d = CITY_VX - CITY_POLE[t], pw = 1 + d / 36;
-        city_pole((uint32_t)t, &lx, &ly, &lw, &lh, &px, &foot, &top);
-        cv_rect(px - pw / 2, top - y0, pw, foot - top, city_gray(210, f));           /* the pole */
-        cv_rect(px - pw, foot - 1 - y0, pw * 2 + 1, 1 + d / 50, city_gray(150, f));    /* its foot */
-        cv_rect(t & 1 ? lx : px, top + 1 - y0, t & 1 ? px - lx : lx + lw - px, 1 + d / 60, city_gray(210, f));   /* its arm */
-        cv_rect(px - 2 - d / 30, top + d / 5 - y0, 5 + d / 15, 1, city_gray(120, f)); /* a cross-bar, for the wires */
-        cv_rect(lx - 1, ly - 1 - y0, lw + 2, lh + 2, city_gray(110, f));              /* the lamp's housing */
-        cv_rect(lx, ly - y0, lw, lh, C_BLACK);
-        if (t < 4)                                                                   /* whose it is, where it can be read */
-            cv_text(lx + (lw - text_w(&FONT_T, INIT[t])) / 2, ly + lh + 2 - y0, &FONT_T, INIT[t], city_gray(200, f));
-    }
-    for (t = 0; t < 2; t++)                                            /* the kerbs' lights, dark */
-        for (k = 0; k < (int32_t)CITY_EDGE; k++) {
-            int32_t ex, ey, ew;
-            city_edge_at((uint32_t)t, (uint32_t)k, &ex, &ey, &ew);
-            cv_rect(ex, ey - y0, ew, ew, city_gray(52, f));
-        }
-    {   /* a corner: the version and the tempo */
-        char c[28], n[8];
-        c[0] = 0;
-        text_cat(c, APP_VERSION);
-        text_cat(c, "  ");
-        int_text((int32_t)(44100.0f * 15.0f / (ck_tick_frames() * 6.0f) + 0.5f), n);
-        text_cat(c, n);
-        text_cat(c, " BPM");
-        cv_text(CITY_VX - text_w(&FONT_T, c) / 2, 229 - y0, &FONT_T, c, city_gray(150, f));
-    }
+    char t[12];
+    const char *v = APP_VERSION;
+    int32_t x = cv_text(4, 1 - oy, &FONT_T, APP_NAME, city_rgb(238, 230, 198, f)), bpm = city.bpm, i;
+    for (i = 0; i < 11 && v[i] && v[i] != '-'; i++)      /* the version's number: 4.11, not -beta */
+        t[i] = v[i];
+    t[i] = 0;
+    cv_text(x + 6, 1 - oy, &FONT_T, t, city_rgb(238, 78, 62, f));
+    t[0] = (char)(bpm >= 100 ? '0' + bpm / 100 : ' ');
+    t[1] = (char)('0' + bpm / 10 % 10);
+    t[2] = (char)('0' + bpm % 10);
+    t[3] = 0;
+    text_cat(t, " BPM");
+    cv_text(236 - text_w(&FONT_T, t), 1 - oy, &FONT_T, t, city_rgb(238, 230, 198, f));
 }
 
 static void city_scene(uint32_t f)           /* the whole picture: three bands */
 {
-    int32_t y0;
+    int32_t y0, x, y;
+    city.bpm = (uint16_t)(44100.0f * 15.0f / seq_sf + 0.5f);
     for (y0 = 0; y0 < 240; y0 += 80) {
+        uint32_t k = (uint32_t)y0 * 7u;
         cv_begin(240, 80, C_BLACK);
-        city_band(y0, f);
+        face_dots(0, 12, 240, 228, 0, y0, f);
+        for (y = 0; y < FACE_OH; y++)        /* the outline */
+            for (x = 0; x < FACE_OW; x++)
+                if (FACE_OUT[y][x >> 3] >> (x & 7) & 1u) {
+                    const uint32_t mk = FACE_MARK[city_hash((uint32_t)(y * 64 + x)) & 7u], h = city_hash(k++);
+                    const int32_t px = 24 + x * 3, py = 9 + y * 5 - y0;
+                    uint32_t b;
+                    if (py < -5 || py > 80)
+                        continue;
+                    cv_rect(px, py, 3, 5, C_BLACK);
+                    for (b = 0; b < 12u; b++)
+                        if (mk >> b & 1u)
+                            cv_rect(px + (int32_t)(b % 3u), py + (int32_t)(b / 3u), 1, 1, h & 8u ? FACE_DIM(f) : FACE_YEL(f));
+                }
+        face_cells(0, 0, y0, f);
+        if (!y0)
+            face_top(0, f);
         cv_blit(0, (uint32_t)y0);
     }
+    city.mouth = 0;
 }
 
-static void city_lights(uint32_t now)        /* the six lamps and the kerbs' lights, as it sounds now */
+static void city_lights(uint32_t now)        /* the six equalizers, the mouth and the tempo, as it sounds now */
 {
     float g[NGRP] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     const int32_t mine = city_group(ui.sel);
@@ -187,53 +161,57 @@ static void city_lights(uint32_t now)        /* the six lamps and the kerbs' lig
         if (k >= 0)
             g[k] += v * v;
     }
-    for (t = 0; t < NGRP; t++) {
-        int32_t lx, ly, lw, lh, n, lit, k;
+    for (t = 0; t < NGRP; t++) {             /* the six equalizers */
+        int32_t lit, k;
         uint32_t br, white;
         float db;
         const float v = fm_sqrtf(g[t]);
-        if (v > 0.03f && v > city.lv[t] * 1.6f) {    /* a hit, well over what the lamp showed: it flashes white */
+        if (v > 0.03f && v > city.lv[t] * 1.6f) {    /* a hit, well over what it showed: it flashes white */
             city.flash_t[t] = now | 1u;
             city.flashes++;
         }
         city.lv[t] = v > city.lv[t] ? v : city.lv[t] * 0.78f;        /* up at once, down over a few frames */
         white = city.flash_t[t] && now - city.flash_t[t] < 90u;
-        city_pole(t, &lx, &ly, &lw, &lh, 0, 0, 0);
-        n = lh / 3 > 1 ? lh / 3 : 1;                                 /* its lights: 2 px and a gap each */
         db = city.lv[t] > 1e-5f ? 6.0206f * fm_log2f(city.lv[t]) : -100.0f;
-        lit = (int32_t)((db + 45.0f) * (float)n / 36.0f + 0.5f);     /* -45 dB .. -9 dB up the lamp */
-        lit = lit < 0 ? 0 : lit > n ? n : lit;
-        br = ((int32_t)t == mine ? 120u : 80u) + (uint32_t)lit * ((int32_t)t == mine ? 136u : 150u) / (uint32_t)n;
-        cv_begin((uint32_t)lw, (uint32_t)lh, C_BLACK);
-        for (k = 0; k < n; k++) {
-            uint16_t c = RGB(CITY_RGB[t][0] / 9u, CITY_RGB[t][1] / 9u, CITY_RGB[t][2] / 9u);     /* unlit: its colour, dark */
-            if (k < lit)
-                c = white ? C_WHITE : RGB(CITY_RGB[t][0] * br >> 8, CITY_RGB[t][1] * br >> 8, CITY_RGB[t][2] * br >> 8);
-            cv_rect(0, lh - 3 * (k + 1) + 1, lw, 2, c);
+        lit = (int32_t)((db + 45.0f) * 12.0f / 36.0f + 0.5f);        /* -45 dB .. -9 dB: 0 .. 12 px */
+        lit = lit < 0 ? 0 : lit > 12 ? 12 : lit;
+        br = (int32_t)t == mine ? 256u : 200u;
+        cv_begin(10, 12, C_BLACK);
+        for (k = 0; k < 3; k++) {            /* three bars, the middle one the level, the others a little less, by turns */
+            int32_t h = k == 1 ? lit : lit * (int32_t)(5u + (city_hash(now / 50u * 3u + (uint32_t)k + t * 8u) & 3u)) / 8;
+            cv_rect(k * 4, 0, 2, 12, RGB(CITY_RGB[t][0] / 9u, CITY_RGB[t][1] / 9u, CITY_RGB[t][2] / 9u));
+            if (h > 0)
+                cv_rect(k * 4, 12 - h, 2, h, white ? C_WHITE : RGB(CITY_RGB[t][0] * br >> 8, CITY_RGB[t][1] * br >> 8, CITY_RGB[t][2] * br >> 8));
         }
-        cv_blit((uint32_t)lx, (uint32_t)ly);
+        cv_blit(CITY_EQ[t][0], CITY_EQ[t][1]);
     }
-    for (side = 0; side < 2u; side++) {      /* the master along the kerb: only the lights that changed */
+    for (side = 0; side < 2u; side++) {      /* the master, left and right, in 14 steps */
         const float v = mst_pk[side];
         float db;
-        uint32_t lit, j;
+        uint32_t lit;
         mst_pk[side] = 0.0f;
         city.mv[side] = v > city.mv[side] ? v : city.mv[side] * 0.80f;
         db = city.mv[side] > 1e-5f ? 6.0206f * fm_log2f(city.mv[side]) : -100.0f;
         lit = db <= -42.0f ? 0u : (uint32_t)((db + 42.0f) * (float)CITY_EDGE / 41.0f + 0.5f);    /* -42 dB .. -1 dB */
-        lit = lit > CITY_EDGE ? CITY_EDGE : lit;
-        for (j = 0; j < CITY_EDGE; j++) {
-            const uint32_t on = j < lit, was = city.edge[side] != 255u && j < city.edge[side];
-            int32_t ex, ey, ew;
-            if (on == was && city.edge[side] != 255u)
-                continue;
-            city_edge_at(side, j, &ex, &ey, &ew);
-            /* green far off, yellow nearer, the last three red */
-            cv_begin((uint32_t)ew, (uint32_t)ew, !on ? RGB(52, 52, 52) : j >= CITY_EDGE - 3u ? RGB(255, 40, 40) :
-                     j >= CITY_EDGE - 7u ? RGB(255, 225, 40) : RGB(60, 255, 70));
-            cv_blit((uint32_t)ex, (uint32_t)ey);
+        city.edge[side] = (uint8_t)(lit > CITY_EDGE ? CITY_EDGE : lit);
+    }
+    {   /* the mouth, from the louder side: closed when silent, wide open (the eyes too) near the top */
+        const uint32_t e = city.edge[0] > city.edge[1] ? city.edge[0] : city.edge[1];
+        const uint32_t m = !e ? 0u : e < 6u ? 1u : e < 9u ? 2u : e < 12u ? 3u : 4u;
+        const uint16_t bpm = (uint16_t)(44100.0f * 15.0f / seq_sf + 0.5f);
+        if (m != city.mouth) {
+            city.mouth = (uint8_t)m;
+            cv_begin(96, 117, C_BLACK);
+            face_dots(78, 90, 96, 117, 78, 90, 256);
+            face_cells(m, 78, 90, 256);
+            cv_blit(78, 90);
         }
-        city.edge[side] = (uint8_t)lit;
+        if (bpm != city.bpm) {
+            city.bpm = bpm;
+            cv_begin(240, 12, C_BLACK);
+            face_top(0, 256);
+            cv_blit(0, 0);
+        }
     }
 }
 

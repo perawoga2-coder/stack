@@ -400,30 +400,32 @@ knobs and steps, also while the loop is on one of them.
   `SAVED SONG CLEARED` and the FM-1 is as new.
 - If you let go of SAVE before the bar is full, nothing is cleared: that is a normal press, and the song is saved.
 
-## The city view
+## The face view
 
-![The city view: six poles with coloured lamps, and lights along the road](img/city.png)
+![The face view: Maker Hip's face drawn in letters, with six small coloured equalizers around it](img/city.png)
 
-Hold HOME for half a second and the screen shows a city at night: a rest for the eyes. It never appears by
-itself.
+Hold HOME for half a second and the screen shows Maker Hip's face, drawn in letters and marks on a dotted ground. It
+never appears by itself. (Before 4.11-beta this was a city at night.)
 
-Six poles stand along the street. Each pole carries a lamp. A lamp is the level meter of one group of sounds, and
-each group has its own colour. The louder the group, the brighter the lamp and the more of it is lit. A new hit
-makes the lamp flash white.
+The face talks with the sound. The louder the music, the wider the mouth opens; at the loudest the eyes open wide
+too. When it is silent the mouth is closed.
 
-| Pole (near to far) | Group | Colour | Which sounds |
+Around the face stand six small equalizers. Each one is the level of one group of sounds, and each group has its own
+colour. The louder the group, the taller the bars. A new hit makes the bars flash white. The group of the selected
+track is a little brighter.
+
+| Equalizer | Group | Colour | Which sounds |
 |---|---|---|---|
-| 1, left, the largest | KICK | sky blue | kicks and toms |
-| 2, right | SNARE | pink | snares, claps and rims |
-| 3, left | HI-HAT | red | hats, crash and ride |
-| 4, right | BASS | green | the BASS sounds |
-| 5, left | MELODY | yellow | KEYS, PAD and LEAD sounds |
-| 6, right, the smallest | SOUND | purple | FX sounds, other percussion, your samples, the loop |
+| top left | KICK | sky blue | kicks and toms |
+| top right | SNARE | pink | snares, claps and rims |
+| middle left | HI-HAT | red | hats, crash and ride |
+| middle right | BASS | green | the BASS sounds |
+| bottom left | MELODY | yellow | KEYS, PAD and LEAD sounds |
+| bottom right | SOUND | purple | FX sounds, other percussion, your samples, the loop |
 
-The lights along the two edges of the road are the master level: the left edge is the left channel, the right edge
-is the right channel. They run from the far end towards you. Green is quiet, yellow is loud, red is very loud.
+Across the top: STACK, the version and the tempo.
 
 - Press any button or turn any knob to go back. That first touch only brings the page back. It changes nothing.
-- The keys still play while the city shows.
+- The keys still play while the face shows.
 - HOME opens it at any time, on any page, playing or stopped. It stays until you touch something.
-- REC is the exception to the first touch: it closes the city view and records at once.
+- REC is the exception to the first touch: it closes the face view and records at once.

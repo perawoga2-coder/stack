@@ -2529,7 +2529,7 @@ static void input(void)
         }
         if (ui.sv_t)
             ui.redraw = 1;                   /* (the hold's bar grows) */
-        /* HOME held: the city view, at any time */
+        /* HOME held: the face view (the city view till 4.10), at any time */
         if (pressed >> B_HOME & 1u)
             ui.home_t = now | 1u;
         if (ui.home_t && (btn >> B_HOME & 1u) && (int32_t)(now - ui.home_t) >= (int32_t)HOME_HOLD_MS) {
@@ -2539,7 +2539,7 @@ static void input(void)
         }
         if (released >> B_HOME & 1u) {
             if (ui.home_t)
-                app_say("HOLD HOME:", "CITY VIEW");
+                app_say("HOLD HOME:", "FACE VIEW");
             ui.home_t = 0;
         }
     }
@@ -3821,6 +3821,8 @@ int app_expect(const char *what, int *got)
         *got = (int)city_group(ui.sel);
     else if (!strncmp(what, "city_g", 6) && what[6] >= '0' && what[6] < '0' + (int)NGRP && !what[7])
         *got = (int)(city.lv[what[6] - '0'] * 1000.0f);      /* city_gN: group N's lamp, its level in 1/1000 */
+    else if (!strcmp(what, "city_mouth"))    /* the face view's mouth drawn: 0 closed .. 4 wide open (255: not yet) */
+        *got = city.mouth;
     else if (!strcmp(what, "city_flashes"))  /* white flashes since the view opened first */
         *got = (int)city.flashes;
     else if (!strcmp(what, "city_el") || !strcmp(what, "city_er"))   /* the lights lit along the left, the right kerb */
