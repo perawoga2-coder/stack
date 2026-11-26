@@ -195,6 +195,7 @@ def main(out):
           f"data_erase {0xA0000}", "reboot", "wait 300", "expect my1 0", "expect my_why1 1",
           f"data_write {0xA0000} 4142434445464748", "reboot", "wait 300", "expect my1 0", "expect my_why1 2",
           "turn ALGO 6", "wait 30", f"turn PRESET {NS + 1}", "wait 60", "shot my_refused.png",
+          "expect msg_MY_1/3_MY_1_(BAD 1",
           "expect lim_clips 0", "expect store_writes 0"]
     open(out, "w").write("\n".join(L) + "\n")
     print(f"{out}: {len(L)} lines; MY 1's gain should come to {g1:.2f}")

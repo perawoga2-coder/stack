@@ -136,23 +136,25 @@ static void list_name(uint32_t i, char *b)   /* "EMPTY", "KICK ROCK", "MY 1 SPOO
     }
 }
 
-static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the category and the sound's place in it; "MY SAMPLES" */
+static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the group and the place in it; "MY 2/3"; EMPTY: "" */
 {
-    const sound_t *s = list_sound(i);
-    uint32_t k, at = 0, of = 0;
+    uint32_t k, at = i - NSOUNDS, of = NMY;
+    const char *g = "MY";
     char n[8];
     b[0] = 0;
-    if (i < 1u || i > NSOUNDS) {
-        text_cat(b, i ? "MY SAMPLES" : "");
+    if (!i)
         return;
+    if (i <= NSOUNDS) {
+        const uint32_t c = SOUNDS[i - 1u].cat;
+        g = CAT_NAME[c];
+        for (k = at = of = 0; k < NSOUNDS; k++)
+            if (SOUNDS[k].cat == c) {
+                of++;
+                if (k < i)
+                    at++;
+            }
     }
-    for (k = 0; k < NSOUNDS; k++)
-        if (SOUNDS[k].cat == s->cat) {
-            of++;
-            if (&SOUNDS[k] <= s)
-                at++;
-        }
-    text_cat(b, CAT_NAME[s->cat]);
+    text_cat(b, g);
     text_cat(b, " ");
     int_text((int32_t)at, n);
     text_cat(b, n);
@@ -1786,8 +1788,6 @@ static struct {
     uint8_t sel;                         /* the selected track */
     uint8_t page;
     int8_t octave;                       /* -2 .. +2 */
-    uint8_t turn_trk, turn_from;         /* PRESETS: the track being turned and the sound the turn began at (the screen says both) */
-    uint32_t turn_t;                     /* its last turn */
     int8_t held_step;                    /* the step page: the step whose key is down (-1 none) */
     uint8_t held_turned;                 /* KNOB 1 turned while it was held: letting go does not toggle it */
     uint8_t note_of[NKEYS];              /* the note each held key started (the octave may change under it) */
@@ -1882,7 +1882,8 @@ static void speak(void)                      /* a screen reader that asks hears 
 }
 
 /* PRESETS: the selected track's sound, one place along the list; the list stops at its ends. Only the sound changes:
- * the knobs' values, the steps and the other tracks stay. The screen says the old and the new */
+ * the knobs' values, the steps and the other tracks stay. The screen says where the turn is now: the group and the
+ * place, and the sound */
 /* ------------------------------------------------------------------ the looper's side of the panel --- */
 static int on_t8l(void) { return ui.sel == lp.trk && lp.own; }   /* the looper's track (T8L or T7L) is selected */
 static void say_t8l(void) { app_say("THE LOOP'S TRACK:", "SELECT ANOTHER"); }
@@ -1937,6 +1938,8 @@ static void looper_undo(void)                /* REC held 3 to 5 s: the take unde
         layer_text(a, lp.layers);
         lp.req = LQ_UNDO;
         app_say(a, "UNDONE");
+    } else if (lp.has && pf_undo_gone) {    /* PERFORM's buffer took the block the undo slept in (perform.c) */
+        app_say("NO UNDO:", "PERFORM USED IT");
     } else if (lp.has) {
         app_say("ONLY 1 LAYER", "CAN BE UNDONE");
     } else {
@@ -1956,9 +1959,9 @@ static void looper_clear(void)               /* REC held 5 s: the whole loop goe
 
 static void sound_turn(int32_t e)
 {
-    uint32_t t = ui.sel, old = trk[t].sound, now = plat_ms();
+    uint32_t t = ui.sel, old = trk[t].sound;
     int32_t to = clamp((int32_t)old + e, 0, (int32_t)NLIST - 1);
-    char a[28], b[28], m[28];
+    char a[28], b[28];
     if (on_t8l()) {                          /* the looper's track has no sound to pick */
         say_t8l();
         return;
@@ -1967,18 +1970,10 @@ static void sound_turn(int32_t e)
         app_say(e < 0 ? "START OF LIST" : "END OF LIST", "");
         return;
     }
-    if (!(ui.turn_trk == t && now - ui.turn_t < 1500u)) {   /* a new turn: the sound it began at */
-        ui.turn_trk = (uint8_t)t;
-        ui.turn_from = (uint8_t)old;
-    }
-    ui.turn_t = now;
     trk[t].sound = (uint8_t)to;
-    list_name(ui.turn_from, a);              /* (the sound before the turn began) */
+    cat_text((uint32_t)to, a);               /* where the turn is now: the group and the place ("FX 2/5"), the sound */
     list_name((uint32_t)to, b);
-    m[0] = 0;
-    text_cat(m, "> ");
-    text_cat(m, b);
-    app_say(a, m);
+    app_say(a, b);
 }
 
 static void octave_step(int32_t d)
@@ -2279,6 +2274,7 @@ static void input(void)
         ui.pkeys |= ui.keys;
         ui.held_step = -1;
         ui.perform = 1;
+        ui.msg_until = 0;                    /* (a message before makes room: the header is PERFORM's at once) */
         ui.redraw = 1;
     }
     if ((released >> B_SEL & 1u) && ui.perform) {
@@ -2523,11 +2519,10 @@ static void input(void)
             ui_sel_isr = ui.sel;
             ui.held_step = -1;
             ui.redraw = 1;
-            if (on_t8l()) {                  /* onto the looper's track: the keys will be silent, said at once */
-                if (ui.page == PAGE_STEP)
-                    ui.page = PAGE_PLAY;     /* (it has no steps to show) */
-                say_t8l();
-            }
+            if (ui.msg[0][8] == '\'')        /* "THE LOOP'S TRACK: ..." was for the track left: it goes at once */
+                ui.msg_until = 0;
+            if (on_t8l() && ui.page == PAGE_STEP)    /* onto the looper's track: it has no steps to show (its LEVEL is */
+                ui.page = PAGE_PLAY;         /* K4's; the keys are silent, said when one is played) */
         }
     }
     if ((e = plat_enc(EN_PRESET)) != 0) {
@@ -2646,21 +2641,33 @@ static void page_words(uint32_t pg, char w[4][28], int32_t *pos)
         pos[q] = p4[q];
 }
 
+static int32_t tag(int32_t xr, const char *s, uint16_t c)   /* a box on the version's line ending at xr: its left */
+{
+    const int32_t x = xr - text_w(&FONT_T, s) - 8;
+    cv_rect(x, 15, xr - x, 12, c);
+    cv_text(x + 4, 15, &FONT_T, s, C_BLACK);
+    return x - 4;
+}
+
 static void draw_header(void)
 {
     char t[28];
+    int32_t xr = 240;
     uint32_t now = plat_ms();
+    const uint32_t svh = ui.sv_t && !ui.sv_fired && (int32_t)(now - ui.sv_t) > 400;
+    /* a bar on the second line (SAVE held, or REC's): it has the line to itself, after the version */
+    const uint32_t bar = svh || (REC_UP && now >= ui.msg_until && !ui.perform);
     cv_begin(240, 28, C_BLACK);
     /* two lines: the first is the name row or a message; the second, small, is the version, always there (the build's
      * APP_VERSION: stack/VERSION, the one place it is written) */
-    if (ui.sv_t && !ui.sv_fired && (int32_t)(now - ui.sv_t) > 400) {
+    if (svh) {
         /* SAVE is being held: what it will do, and a bar that fills until it does */
         const uint32_t held = now - ui.sv_t;
         cv_rect(0, 0, 44, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "SAVE", C_BLACK);
         cv_text(50, 2, &FONT_XS, "HOLD: CLEAR SAVED SONG", C_WHITE);
-        cv_rect(42, 20, 192, 5, C_LINE);
-        cv_rect(42, 20, (int32_t)(held >= SAVE_HOLD_MS ? 192u : held * 192u / SAVE_HOLD_MS), 5, C_WHITE);
+        cv_rect(50, 20, 184, 5, C_LINE);
+        cv_rect(50, 20, (int32_t)(held >= SAVE_HOLD_MS ? 184u : held * 184u / SAVE_HOLD_MS), 5, C_WHITE);
     } else if (now < ui.msg_until) {
         int32_t x = cv_text(6, 0, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
@@ -2733,24 +2740,18 @@ static void draw_header(void)
     }
     {
         int32_t x = cv_text(6, 15, &FONT_T, APP_VERSION, C_GRAY);
-        if (!(REC_UP && now >= ui.msg_until && !ui.perform))
-        {
+        if (!bar) {
             x = cv_text(x + 8, 15, &FONT_T, !ck_follow ? "CLOCK: FM-1" : ck_src == PORT_BLE ? "CLOCK: BT" : "CLOCK: BURGER",
                         ck_follow ? C_HI : C_GRAY);
             if (ck_ble)                      /* a Bluetooth link is up */
                 cv_text(x + 6, 15, &FONT_T, "BT", C_WHITE);
         }
     }
-    if (stack_mute && !(REC_UP && now >= ui.msg_until && !ui.perform)) {
-        /* the app plays the FM-1's sound: said on the second line, on every page (a looper's bar there goes first) */
-        int32_t w = text_w(&FONT_XS, "SOUND IN BURGER");
-        cv_rect(240 - w - 10, 15, w + 10, 12, C_ORANGE);
-        cv_text(240 - w - 5, 15, &FONT_XS, "SOUND IN BURGER", C_BLACK);
-    }
+    if (stack_mute && !bar)                  /* the app plays the FM-1's sound: said on the second line, on every page */
+        xr = tag(xr, "SOUND IN BURGER", C_ORANGE);   /* (a bar there goes first) */
     if (!ui.perform && perform_lit()) {      /* effects of PERFORM's are on with SEL let go (LATCH): never silently */
         const uint32_t m = perform_lit();
         uint32_t k2, cnt = 0, first = 0;
-        int32_t w, x0;
         t[0] = 0;
         for (k2 = 0; k2 < NPK; k2++)
             if (m >> k2 & 1u) {
@@ -2768,10 +2769,7 @@ static void draw_header(void)
             int_text((int32_t)cnt - 1, c2);
             text_cat(t, c2);
         }
-        w = text_w(&FONT_XS, t);
-        x0 = stack_mute ? 4 : 240 - w - 10;  /* (right, as SOUND IN BURGER is; with that one up, left) */
-        cv_rect(x0, 15, w + 10, 12, C_WHITE);
-        cv_text(x0 + 5, 15, &FONT_XS, t, C_BLACK);
+        tag(xr, t, C_WHITE);                 /* (right, as SOUND IN BURGER is; with that one up, left of it) */
     }
     cv_rect(0, 27, 240, 1, C_LINE);
     cv_blit(0, 0);
@@ -3132,7 +3130,8 @@ static void draw_page4(uint32_t pg)
         if (!tr->ed_start)
             text_cat(w[0], " FROM ITS START");
         if (tr->ed_loop == ED_LOOP_AUTO)
-            text_cat(w[2], snd && (snd->flags & SF_LOOP) ? ": AS THE SOUND, LOOPED" : ": AS THE SOUND, ONCE");
+            text_cat(w[2], !snd ? "" : (snd->flags & SF_LOOP) ? ": ITS OWN LOOP" :      /* (since 4.03: a held key */
+                           (snd->flags & SF_DRUM) || tr->ed_rev ? ": ONCE" : ": HOLDS WHILE HELD");   /* holds) */
         else if (tr->ed_loop == ED_LOOP_ON)
             text_cat(w[2], snd && (snd->flags & SF_LOOP) ? ": ITS OWN LOOP" : ": START TO LENGTH");
         if (tr->ed_len == 100u)
@@ -3409,9 +3408,11 @@ void app_frame(void)
             said = now | 1u;
         }
     }
-    if (pf_undo_gone) {                      /* a buffer effect of PERFORM's took the block the looper's undo was in */
-        pf_undo_gone = 0;
+    if (pf_undo_gone == 1u) {                /* a buffer effect of PERFORM's took the block the looper's undo was in: */
+        pf_undo_gone = 2;                    /* said once; kept (2) for REC's undo to say why, until a new layer's undo */
         app_say("PERFORM USED", "THE UNDO LAYER");
+    } else if (lp.undo && pf_undo_gone) {
+        pf_undo_gone = 0;
     }
     {
         static uint8_t take_drawn;           /* (the overlay's dim keys follow the take) */
@@ -3636,6 +3637,19 @@ int app_expect(const char *what, int *got)
         *got = lp.has;
     else if (!strcmp(what, "loop_layers"))
         *got = lp.layers;
+    else if (!strncmp(what, "msg_", 4)) {    /* msg_TEXT: the header's message now has TEXT in it ('_' a space): 1, else 0 */
+        char t[64], w[48];
+        uint32_t i;
+        for (i = 0; what[4u + i] && i < 47u; i++)
+            w[i] = what[4u + i] == '_' ? ' ' : what[4u + i];
+        w[i] = 0;
+        t[0] = 0;
+        text_cat(t, ui.msg[0]);
+        text_cat(t, " ");
+        text_cat(t, ui.msg[1]);
+        *got = plat_ms() < ui.msg_until && strstr(t, w) != 0;
+        printf("  the header says: %s\n", plat_ms() < ui.msg_until ? t : "(nothing)");
+    }
     else if (!strcmp(what, "loop_undo"))     /* a layer can be taken off, */
         *got = lp.undo;
     else if (!strcmp(what, "loop_state"))    /* 0 idle, 1 waiting for the bar, 2 recording, */

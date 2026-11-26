@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.06-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.07-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -45,7 +45,8 @@ All sounds are in one list. The list starts with EMPTY. Then come 69 built-in so
 PAD, LEAD, FX. The last three places are MY 1, MY 2 and MY 3: the samples you send from Burger Studio.
 
 Turn PRESETS slowly to go sound by sound. The list stops at both ends. The bottom line of the screen shows the
-group and the place, for example `KEYS 3/15`.
+group and the place, for example `KEYS 3/15` or `MY 2/3`. While you turn, the top of the screen shows where you
+are now: the group and the place, and the sound, for example `FX 2/5 RAIN`.
 
 Tracks 1 to 6 start with a sound. Tracks 7 and 8 start EMPTY.
 
@@ -155,7 +156,7 @@ Press EDIT to open page 1. It changes how the selected track plays its sound.
 |---|---|
 | K1 START | Where the sound starts, in per cent. |
 | K2 REVERSE | ON plays the sound backwards. |
-| K3 LOOP | AUTO plays the sound as it is, and holds it while you hold a key (see below). OFF plays it once. ON loops it. |
+| K3 LOOP | AUTO: a sound with its own loop loops; a drum plays once; any other sound holds while you hold a key (see below). OFF plays it once. ON loops it. |
 | K4 LENGTH | How much of the sound plays after START. 100% is to the end. |
 
 **Long notes (LOOP on AUTO).** Hold a key and the note sounds for as long as you hold it, also on sounds that
@@ -165,7 +166,8 @@ and fades as RELEASE says. START and LENGTH move the place: a shorter LENGTH hol
 
 - Drums play once, as always.
 - Steps of the sequencer play the sound once, as always. Only keys you hold (and the ARP's notes) are held.
-- LOOP OFF plays the sound once, also under a held key. A sound that FIT stretches to bars is not held either.
+- LOOP OFF plays the sound once, also under a held key. A sound that FIT stretches to bars is not held either, nor
+  a sound played backwards (REVERSE ON): the screen then says `AUTO: ONCE`.
 - A held note has a steady, organ-like tone. It no longer fades by itself, so a piano held for long does not
   sound like a real piano.
 
@@ -254,13 +256,16 @@ happen when you let go.
   plays while the loop is on the other.
 - A layer you cancel, or an undo, does not move the loop. When you clear the loop, tracks 7 and 8 both play their
   own sounds again, and the next first layer goes to track 8.
-- If the selected track is the one that holds the loop (T8L or T7L), the keys are silent and the screen says
-  `SELECT ANOTHER`. Select another track to play.
+- If the selected track is the one that holds the loop (T8L or T7L), the keys are silent. Play a key there and the
+  screen says `THE LOOP'S TRACK: SELECT ANOTHER`. Select another track to play. Selecting T8L or T7L only to set
+  the loop's LEVEL says nothing.
 - The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.
-- A layer on top is only kept when you let go of REC within half a second. If you hold REC longer, that layer is
-  dropped and the loop stays as it was. So holding REC to remove a layer never records anything.
-- If you hold the REC press that ends a layer for 3 seconds, the layer you just made is removed again.
+- The press that **starts** a layer on top must be a short one: let go of REC within half a second. If you hold
+  that press longer, it is a hold (undo or clear, see the table), the layer is dropped and the loop stays as it
+  was. So holding REC to remove a layer never records anything.
+- The press that **ends** a layer keeps that layer at once, however long you hold it. If you hold it for 3
+  seconds, the layer you just made is removed again.
 - Starting a new layer means the layer before it can no longer be removed.
 - If you stop the sequencer while a layer records, that layer is dropped.
 - When the FM-1 follows a clock (`CLOCK: BURGER` or `CLOCK: BT`), the clock starts the sequencer. REC while it is
@@ -306,7 +311,8 @@ effect on everything you hear, on all tracks at once. Hold the key: the effect i
 
 - While the looper records a layer, keys 1 to 6 and key 15 wait. They are dim on the screen.
 - If you use keys 1 to 5, the looper can no longer remove its last layer (REC held 3 seconds). The screen tells you once:
-  `PERFORM USED THE UNDO LAYER`. The loop itself is safe.
+  `PERFORM USED THE UNDO LAYER`. The loop itself is safe. Hold REC for an undo after that and the screen says
+  `NO UNDO: PERFORM USED IT`. The next layer can be removed again.
 
 **LATCH.** On the GLO page, K4 sets PERFORM LATCH to ON or OFF. It starts OFF.
 

@@ -23,7 +23,7 @@ enum { PK_REP8, PK_REP16, PK_REP32, PK_REV, PK_FREEZE, PK_TAPE, PK_LP, PK_HP, PK
 #define PK_NOTAKE (PK_BUFFER | 1u << PK_TAPE | 1u << PK_OCT)   /* not while a take records (they would be in it, or need its block) */
 static volatile uint16_t pf_on;              /* the effects that are on, but the buffer's (the main loop sets them) */
 static volatile uint8_t pf_buf;              /* the buffer's effect wanted: 0 none, else 1 + PK_* */
-static volatile uint8_t pf_undo_gone;        /* a buffer effect took the block the undo was in: the screen says so once */
+static volatile uint8_t pf_undo_gone;        /* a buffer effect took the block the undo was in: 1 the screen says so, 2 said */
 static uint8_t pf_run;                       /* something of it sounds: its stages run */
 static float pf_g[NPK];                      /* each effect's ramp, 0 .. 1 (the audio interrupt) */
 static float pf_rate = 1.0f;                 /* the voices' rate (TAPE STOP, OCT DOWN): 1 none */

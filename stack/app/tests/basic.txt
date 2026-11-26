@@ -54,6 +54,8 @@ turn PRESET 1
 wait 40
 shot sound_change.png
 expect sound 35
+# (4.07: the header says where the turn is now: the group and the place, and the sound)
+expect msg_KEYS_3/15_SOFT_EP 1
 expect pitch 5
 expect level 70
 leds

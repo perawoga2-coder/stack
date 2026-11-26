@@ -1253,5 +1253,6 @@ wait 30
 turn PRESET 70
 wait 60
 shot my_refused.png
+expect msg_MY_1/3_MY_1_(BAD 1
 expect lim_clips 0
 expect store_writes 0
