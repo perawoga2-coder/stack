@@ -401,7 +401,9 @@ static uint32_t loop_block(float *out, uint32_t n, int32_t bar_off, uint32_t pla
         } else if (lp.end_in > 441.0f + (float)REC_LAG) {
             lp.end_in = 441.0f + (float)REC_LAG;
         }
-    } else if (q == LQ_UNDO && lp.state == LP_IDLE && lp.undo && !lp.fading) {
+    } else if (q == LQ_UNDO && lp.state != LP_REC && lp.undo && !lp.fading) {
+        if (lp.state)                            /* (a layer on top that waited, its cancel not yet taken: it goes first) */
+            loop_drop();
         lp.fading = 1;
         lp.fade = 0.0f;
         lp.undo = 0;

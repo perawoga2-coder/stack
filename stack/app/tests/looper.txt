@@ -860,6 +860,37 @@ key 7 up
 turn PRESET 1
 wait 60
 expect msg_SELECT_ANOTHER 0
+# (4.09: not silent either: it is said on the bottom line, where the hints are; the header stays the take's)
+expect scr_THE_LOOP'S_TRACK:_SELECT_ANOTHER 1
+tap SEQ
+wait 40
+expect page 0
+expect msg_SELECT_ANOTHER 0
+expect scr_THE_LOOP'S_TRACK:_SELECT_ANOTHER 1
+# the EDIT pages' words for the loop's track go there too: NOTHING TO EDIT (the button, a knob), NOTHING TO FIT
+tap EDIT
+wait 40
+expect page 5
+expect msg_NOTHING_TO_EDIT 0
+expect scr_THE_LOOP'S_TRACK:_NOTHING_TO_EDIT 1
+wait 1700
+expect scr_NOTHING_TO_EDIT 0
+turn K1 1
+wait 40
+expect msg_NOTHING_TO_EDIT 0
+expect scr_THE_LOOP'S_TRACK:_NOTHING_TO_EDIT 1
+tap EDIT
+wait 40
+expect page 7
+turn K2 1
+wait 40
+expect msg_NOTHING_TO_FIT 0
+expect scr_THE_LOOP'S_TRACK:_NOTHING_TO_FIT 1
+shot looper_t8l_take_hint.png
+tap EDIT
+wait 40
+expect page 0
+expect loop_state 2
 tap REC
 wait 2500
 expect loop_state 0

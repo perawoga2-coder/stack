@@ -262,8 +262,9 @@ records, letting go cancels it: `LET GO: CANCEL TAKE`. With no loop at all the t
   own sounds again, and the next first layer goes to track 8.
 - If the selected track is the one that holds the loop (T8L or T7L), the bottom line of the screen shows `LOOP` and
   its length, for example `LOOP 2 BARS`, where other tracks show their sound's group and place. The keys are
-  silent. Play a key there and the screen says `THE LOOP'S TRACK: SELECT ANOTHER` (but not while a layer records: the top
-of the screen keeps showing the recording). Select another track to play.
+  silent. Play a key there and the screen says `THE LOOP'S TRACK: SELECT ANOTHER` (while a layer records, on the
+  bottom line: the top of the screen keeps showing the recording; the same for `NOTHING TO EDIT` and `NOTHING TO FIT`
+  on the EDIT pages). Select another track to play.
   Selecting T8L or T7L only to set the loop's LEVEL says nothing.
 - The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.
