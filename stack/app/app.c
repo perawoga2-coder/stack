@@ -3281,30 +3281,37 @@ static void draw_perform(void)
 }
 
 #define TITLE_MS 2000u                   /* the title after a start: the name and the version, large */
-/* the cover: record crates stacked any old how, one on another, drawn from a few rectangles each (no picture is
- * stored): a crate is its two side posts, three slats with a hand hole in the middle one, and the records in it, their
- * spines of several colours and heights showing over its top. y0: the band's top in the picture (240 x 160) */
+/* the cover: psychedelic mushrooms drawn in characters on an olive dot grid, as on STACK's cover (since 4.11-beta;
+ * before, record crates): title_data.h, a cell of 6 x 9 px each. The caps' letters and outline in rings of the rainbow
+ * from each cap's middle, the spots cream, the stems STACK's words. y0: the band's top in the picture (240 x 160) */
+#include "title_data.h"
 static void cover_band(int32_t y0)
 {
-    static const struct { uint8_t x, y, w; } CRATE[5] = {{10, 126, 96}, {26, 96, 84}, {4, 66, 92}, {30, 36, 80}, {16, 6, 88}};
-    static const uint16_t SPINE[6] = {C_ORANGE, C_WHITE, RGB(64, 176, 164), RGB(214, 70, 70), RGB(236, 196, 72), RGB(120, 130, 210)};
-    const uint16_t wood = RGB(168, 118, 66), dark = RGB(98, 66, 36);
-    uint32_t c, i;
-    for (c = 0; c < 5u; c++) {
-        const int32_t x = CRATE[c].x, y = (int32_t)CRATE[c].y - y0, w = CRATE[c].w;
-        if (y > 80 || y + 30 < 0)
+    static const uint8_t BOW[7][3] = {{255, 60, 60}, {255, 150, 40}, {250, 230, 50}, {70, 230, 90}, {50, 200, 255}, {90, 110, 255}, {200, 80, 255}};
+    static const char WORDS[] = "clock*anything*stack*rec*play*one*loop*eight*tracks*maker*hip*";
+    uint32_t i, k = 0;
+    char ch[2] = {0, 0};
+    for (i = 0; i < TITLE_C * TITLE_R; i++) {
+        const uint32_t v = TITLE_CELLS[i >> 1] >> ((i & 1u) * 4u) & 15u;
+        const int32_t c = (int32_t)(i % TITLE_C), r = (int32_t)(i / TITLE_C), x = c * 6, y = r * 9 - y0;
+        const int32_t dc = c - (c < 13 ? 8 : 16), dr = r - (c < 13 ? 8 : 10);
+        const uint8_t *bw = BOW[(uint32_t)(dc * dc + 3 * dr * dr) / 10u % 7u];
+        uint16_t col = RGB(240, 232, 204);
+        if (v == 2u || v == 4u)
+            k++;                                 /* (the words run on through every band) */
+        if (y < -9 || y > 80)
             continue;
-        cv_rect(x + 3, y + 2, w - 6, 26, C_BLACK);                       /* the crate's inside */
-        for (i = 0; (int32_t)(4u + i * 3u) < w - 6; i++) {               /* the records: a spine every 3 px */
-            const uint32_t h = (i * 7u + c * 5u) % 9u, col = (i * 5u + c * 3u + (i >> 2)) % 6u;
-            cv_rect(x + 4 + (int32_t)i * 3, y - 3 + (int32_t)(h > 5u ? 8u - h : h), 2, 9, SPINE[col]);
+        if (!v) {
+            if ((uint32_t)(c * 7 + r * 3) % 5u)
+                cv_rect(x + 3, y + 4, 1, 1, RGB(92, 84, 36));                /* the dot grid */
+            continue;
         }
-        for (i = 0; i < 3u; i++)                                         /* three slats */
-            cv_rect(x, y + 5 + (int32_t)i * 8, w, 6, i == 1u ? dark : wood);
-        cv_rect(x + w / 2 - 9, y + 14, 18, 4, C_BLACK);                  /* the hand hole */
-        cv_rect(x, y + 2, 4, 26, wood);                                  /* the posts */
-        cv_rect(x + w - 4, y + 2, 4, 26, wood);
-        cv_rect(x + 1, y + 28, w - 2, 1, dark);
+        ch[0] = v == 1u ? '#' : v == 3u ? 'o' : v == 5u ? ':' : WORDS[(k - 1u) % (sizeof WORDS - 1u)];
+        if (v <= 2u)
+            col = RGB(bw[0], bw[1], bw[2]);
+        else if (v == 5u)
+            col = RGB(64, 200, 190);
+        cv_text(x, y - 3, &FONT_XS, ch, col);
     }
 }
 

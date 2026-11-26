@@ -2,7 +2,7 @@
 
 STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.10-beta.
 
-![The start screen: record crates stacked on top of each other](img/cover.png)
+![The start screen: psychedelic mushrooms drawn in letters](img/cover.png)
 
 ## Read this first
 
