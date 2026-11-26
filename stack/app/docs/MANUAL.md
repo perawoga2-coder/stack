@@ -1,6 +1,6 @@
 # STACK manual
 
-STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.09-beta.
+STACK is a firmware for the M-VAVE FM-1, made by Maker Hip. This manual is for version 4.10-beta.
 
 ![The start screen: record crates stacked on top of each other](img/cover.png)
 
@@ -238,8 +238,10 @@ Nothing waits for a bar, and you do not have to press PLAY first.
 While you hold REC, a bar fills at the top of the screen. A mark shows the 3 seconds, and the text says what will
 happen. Before 3 seconds: `HOLD 3 S: UNDO LAYER  5 S: CLEAR LOOP`, or `HOLD 3 S: NO UNDO` when there is no layer
 that can be removed. After 3 seconds: `LET GO: UNDO LAYER  HOLD ON: CLEAR`, or `LET GO: NO UNDO`. While a layer
-records, letting go cancels it: `LET GO: CANCEL TAKE`. With no loop at all the text says
-`NO LOOP: NOTHING TO UNDO OR CLEAR`.
+records, letting go cancels it: `HOLD 3 S: CANCEL TAKE  5 S: CLEAR LOOP`, then `LET GO: CANCEL TAKE`. If you keep
+holding the press that started a first layer, it records on, and its recording-time bar stays until 3 seconds.
+Held to 5 seconds while a first layer records (no loop yet), only that layer goes: the screen says
+`TAKE CANCELLED`. With no loop at all the text says `NO LOOP: NOTHING TO UNDO OR CLEAR`.
 
 - **The loop need not start on the first beat.** It starts where you pressed REC. Because its length is whole
   bars, it comes round at the same place of the bar every time.
@@ -265,6 +267,8 @@ records, letting go cancels it: `LET GO: CANCEL TAKE`. With no loop at all the t
   silent. Play a key there and the screen says `THE LOOP'S TRACK: SELECT ANOTHER` (while a layer records, on the
   bottom line: the top of the screen keeps showing the recording; the same for `NOTHING TO EDIT` and `NOTHING TO FIT`
   on the EDIT pages). Select another track to play.
+- While a layer records, the name of a page you open (`EDIT PAGE 2`, `FX PAGE`, `ENV PAGE` and so on) shows on the
+  bottom line too, so the top of the screen keeps showing the recording.
   Selecting T8L or T7L only to set the loop's LEVEL says nothing.
 - The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.

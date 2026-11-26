@@ -398,6 +398,9 @@ expect loop_state 2
 expect loop_own 1
 wait 700
 expect loop_state 2
+# (4.10: from half a second the hold's line shows, as in the other cases; the take's bar stays until 3 s)
+expect scr_HOLD_3_S:_CANCEL_TAKE__5_S:_CLEAR_LOOP 1
+shot looper_hold_take.png
 release REC
 wait 100
 expect loop_state 2
@@ -882,12 +885,36 @@ expect scr_THE_LOOP'S_TRACK:_NOTHING_TO_EDIT 1
 tap EDIT
 wait 40
 expect page 7
+# (4.10: the page's name goes on the bottom line too; the header stays the take's)
+expect msg_EDIT_PAGE_2 0
+expect scr_EDIT_PAGE_2 1
 turn K2 1
 wait 40
 expect msg_NOTHING_TO_FIT 0
 expect scr_THE_LOOP'S_TRACK:_NOTHING_TO_FIT 1
 shot looper_t8l_take_hint.png
 tap EDIT
+wait 40
+expect page 0
+expect msg_TRACKS_PAGE 0
+expect scr_TRACKS_PAGE 1
+# FX, its page 2 and back; ENV: the same
+tap FX
+wait 40
+expect page 2
+expect msg_FX_PAGE 0
+expect scr_FX_PAGE 1
+tap FX
+wait 40
+expect scr_FX_PAGE_2:_EQ 1
+tap FX
+wait 40
+expect page 0
+tap ENV
+wait 40
+expect msg_ENV_PAGE 0
+expect scr_ENV_PAGE 1
+tap ENV
 wait 40
 expect page 0
 expect loop_state 2
@@ -904,3 +931,23 @@ wait 60
 expect msg_THE_LOOP'S_TRACK:_SELECT_ANOTHER 1
 key 7 up
 wait 20
+# --- 4.10: a take with no loop under it, REC held to 5 s: only the take goes, and that is what is said
+press REC
+wait 5200
+release REC
+wait 200
+expect loop_has 0
+expect loop_state 0
+press REC
+wait 1000
+expect loop_state 2
+expect loop_has 0
+expect scr_HOLD_3_S:_CANCEL_TAKE__5_S:_CLEAR_LOOP 1
+wait 4100
+expect msg_TAKE_CANCELLED 1
+expect msg_LOOP_CLEARED 0
+release REC
+wait 200
+expect loop_state 0
+expect loop_has 0
+expect loop_own 0

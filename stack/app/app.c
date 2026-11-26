@@ -1977,7 +1977,7 @@ static void looper_clear(void)               /* REC held 5 s: the whole loop goe
 {
     if (lp.has || LP_TAKE_LIVE) {
         lp.req = LQ_CLEAR;
-        app_say("LOOP CLEARED", "");
+        app_say(lp.has ? "LOOP CLEARED" : "TAKE", lp.has ? "" : "CANCELLED");  /* (no loop: only the take went) */
     } else {
         app_say("NOTHING TO CLEAR", "");
     }
@@ -2487,6 +2487,7 @@ static void input(void)
             app_say(ui.page == PAGE_STEP ? "STEP PAGE" : ui.page == PAGE_FX ? "FX PAGE" : ui.page == PAGE_ENV ? "ENV PAGE" :
                     ui.page == PAGE_LFO ? "LFO PAGE" : ui.page == PAGE_EDIT ? "EDIT PAGE 1" : ui.page == PAGE_ARP ? "ARP PAGE" :
                     ui.page == PAGE_EDIT2 ? "EDIT PAGE 2" : ui.page == PAGE_GLO ? "GLO PAGE" : ui.page == PAGE_EQ ? "FX PAGE 2: EQ" : "TRACKS PAGE", "");
+            ui.msg_low = (uint8_t)LP_TAKE;   /* (over a take, on the bottom line: the header stays the take's) */
             if (ui.page == PAGE_EDIT && on_t8l())
                 say_t8l("NOTHING TO EDIT");
         } else {
@@ -2705,11 +2706,12 @@ static void draw_header(void)
         cv_text(82, 2, &FONT_XS, pf_latch ? "LATCH: A KEY ON, AGAIN OFF" : "HOLD A WHITE KEY", C_HI);
     } else if (REC_UP) {
         /* REC is held, or a take waits or runs: said on a block, then where it stands */
-        int32_t held = ui.rec_t && !ui.rec_fired ? (int32_t)(now - ui.rec_t) : 0;
+        const int32_t held = ui.rec_t && !ui.rec_fired ? (int32_t)(now - ui.rec_t) : 0;
+        /* (the press that began a first layer, still down: it records on; the hold's line shows, the take's bar stays
+         * until 3 s) */
+        const int keep = ui.rec_take && lp.state == LP_REC && lp.first && held < (int32_t)REC_UNDO_MS;
         const char *w;
         char c[8];
-        if (ui.rec_take && lp.state == LP_REC && lp.first && held < (int32_t)REC_UNDO_MS)
-            held = 0;                        /* (the press that began a first layer, still down: it records, and shows that) */
         t[0] = 0;
         cv_rect(0, 0, 36, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "REC", C_BLACK);
@@ -2748,7 +2750,7 @@ static void draw_header(void)
             w = t;
         }
         cv_text(42, 2, &FONT_XS, w, held < (int32_t)REC_SHORT_MS ? C_WHITE : C_HI);
-        if (held >= (int32_t)REC_SHORT_MS) {             /* the hold's bar: a mark at 3 s, full at 5 s */
+        if (held >= (int32_t)REC_SHORT_MS && !keep) {    /* the hold's bar: a mark at 3 s, full at 5 s */
             cv_rect(50, 20, 184, 5, C_LINE);
             cv_rect(50, 20, (int32_t)((uint32_t)held >= REC_CLEAR_MS ? 184u : (uint32_t)held * 184u / REC_CLEAR_MS), 5,
                     held >= (int32_t)REC_UNDO_MS ? C_ORANGE : C_WHITE);
