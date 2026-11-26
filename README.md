@@ -3,7 +3,7 @@
 **Clock Anything.** · STACK Studio Chain
 
 STACK is Maker Hip's own firmware for the M-VAVE FM-1: eight tracks, each with one sound from 69 built-in sounds or a
-sample sent from the Burger Studio app, DJ-style effects, ENV, LFO, EDIT and ARP per track, a 16-step sequencer, a
+sample sent from the Burger Studio app, DJ-style effects, a 3-band EQ, ENV, LFO, EDIT and ARP per track, a 16-step sequencer, a
 one-button looper on REC (8 s, it moves between tracks 8 and 7), PERFORM (effects on everything from the white keys), SAVE, and MIDI clock in or out over USB and
 Bluetooth.
 
