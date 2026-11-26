@@ -202,3 +202,13 @@ shot not_yet.png
 # one sound at a time never reaches the limiter
 expect lim_clips 0
 expect store_writes 0
+# (4.08) PRESETS back to EMPTY: EMPTY has no group, the header says EMPTY with no space before it
+turn PRESET -120
+wait 40
+turn PRESET 1
+wait 40
+turn PRESET -1
+wait 40
+expect sound 0
+expect msg_EMPTY 1
+expect msg__EMPTY 0

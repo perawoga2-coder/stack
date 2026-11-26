@@ -46,7 +46,8 @@ PAD, LEAD, FX. The last three places are MY 1, MY 2 and MY 3: the samples you se
 
 Turn PRESETS slowly to go sound by sound. The list stops at both ends. The bottom line of the screen shows the
 group and the place, for example `KEYS 3/15` or `MY 2/3`. While you turn, the top of the screen shows where you
-are now: the group and the place, and the sound, for example `FX 2/5 RAIN`.
+are now: the group and the place, and the sound, for example `FX 2/5 RAIN`. EMPTY has no group: the top says just
+`EMPTY`.
 
 Tracks 1 to 6 start with a sound. Tracks 7 and 8 start EMPTY.
 
@@ -235,7 +236,8 @@ Nothing waits for a bar, and you do not have to press PLAY first.
 | Hold less than 3 seconds, then let go | Nothing. |
 
 While you hold REC, a bar fills at the top of the screen. A mark shows the 3 seconds, and the text says what will
-happen when you let go.
+happen when you let go: `LET GO: UNDO LAYER`, or `LET GO: NO UNDO` when there is no layer that can be
+removed.
 
 - **The loop need not start on the first beat.** It starts where you pressed REC. Because its length is whole
   bars, it comes round at the same place of the bar every time.
@@ -256,9 +258,10 @@ happen when you let go.
   plays while the loop is on the other.
 - A layer you cancel, or an undo, does not move the loop. When you clear the loop, tracks 7 and 8 both play their
   own sounds again, and the next first layer goes to track 8.
-- If the selected track is the one that holds the loop (T8L or T7L), the keys are silent. Play a key there and the
-  screen says `THE LOOP'S TRACK: SELECT ANOTHER`. Select another track to play. Selecting T8L or T7L only to set
-  the loop's LEVEL says nothing.
+- If the selected track is the one that holds the loop (T8L or T7L), the bottom line of the screen shows `LOOP` and
+  its length, for example `LOOP 2 BARS`, where other tracks show their sound's group and place. The keys are
+  silent. Play a key there and the screen says `THE LOOP'S TRACK: SELECT ANOTHER`. Select another track to play.
+  Selecting T8L or T7L only to set the loop's LEVEL says nothing.
 - The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.
 - The press that **starts** a layer on top must be a short one: let go of REC within half a second. If you hold
@@ -312,7 +315,7 @@ effect on everything you hear, on all tracks at once. Hold the key: the effect i
 - While the looper records a layer, keys 1 to 6 and key 15 wait. They are dim on the screen.
 - If you use keys 1 to 5, the looper can no longer remove its last layer (REC held 3 seconds). The screen tells you once:
   `PERFORM USED THE UNDO LAYER`. The loop itself is safe. Hold REC for an undo after that and the screen says
-  `NO UNDO: PERFORM USED IT`. The next layer can be removed again.
+  `NO UNDO: PERFORM USED IT` (while you hold: `LET GO: NO UNDO`). The next layer can be removed again.
 
 **LATCH.** On the GLO page, K4 sets PERFORM LATCH to ON or OFF. It starts OFF.
 
@@ -387,6 +390,7 @@ knobs and steps, also while the loop is on one of them.
 - If a saved track used a sample that is no longer there, that track is EMPTY.
 - **To clear the saved song:** stop, then hold SAVE for two seconds. A bar fills. Then the screen says
   `SAVED SONG CLEARED` and the FM-1 is as new.
+- If you let go of SAVE before the bar is full, nothing is cleared: that is a normal press, and the song is saved.
 
 ## The city view
 

@@ -232,6 +232,9 @@ wait 60
 expect track 7
 expect msg_SELECT_ANOTHER 0
 shot looper_t7l.png
+# (4.08: the bottom line's corner says LOOP and its length, not track 7's own sound's group and place)
+expect scr_LOOP_1_BAR 1
+expect scr_DRUMS 0
 key 7 down 100
 wait 60
 expect voices 0
@@ -259,6 +262,7 @@ turn ALGO 1
 wait 60
 expect track 8
 expect msg_SELECT_ANOTHER 0
+expect scr_LOOP 0
 expect level 80
 turn ALGO -1
 wait 60

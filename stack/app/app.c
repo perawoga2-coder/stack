@@ -1812,6 +1812,13 @@ static struct {
     uint32_t wake;                       /* buttons down when a touch closed the city view: they do nothing until let go */
 } ui;
 
+#ifdef PLAT_HOST                             /* what REC's hold line and the bottom line's corner said (expect scr_) */
+static char host_hold[48], host_corner[24];
+#define HOST_KEEP(b, s) (strncpy(b, s, sizeof b - 1u))
+#else
+#define HOST_KEEP(b, s) ((void)0)
+#endif
+
 void app_say(const char *a, const char *b)
 {
     uint32_t i;
@@ -1887,6 +1894,14 @@ static void speak(void)                      /* a screen reader that asks hears 
 /* ------------------------------------------------------------------ the looper's side of the panel --- */
 static int on_t8l(void) { return ui.sel == lp.trk && lp.own; }   /* the looper's track (T8L or T7L) is selected */
 static void say_t8l(void) { app_say("THE LOOP'S TRACK:", "SELECT ANOTHER"); }
+
+static void bars_cat(char *a)                /* + "2 BARS": the loop's length */
+{
+    char n[8];
+    int_text(lp.bars, n);
+    text_cat(a, n);
+    text_cat(a, lp.bars == 1u ? " BAR" : " BARS");
+}
 
 static void layer_text(char *a, uint32_t n)  /* "LAYER 3" */
 {
@@ -1973,7 +1988,7 @@ static void sound_turn(int32_t e)
     trk[t].sound = (uint8_t)to;
     cat_text((uint32_t)to, a);               /* where the turn is now: the group and the place ("FX 2/5"), the sound */
     list_name((uint32_t)to, b);
-    app_say(a, b);
+    app_say(a[0] ? a : b, a[0] ? b : "");    /* (EMPTY has no group: its name, with no space before it) */
 }
 
 static void octave_step(int32_t d)
@@ -2686,14 +2701,15 @@ static void draw_header(void)
         cv_rect(0, 0, 36, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "REC", C_BLACK);
         if (held >= (int32_t)REC_UNDO_MS) {
-            w = lp.state != LP_IDLE ? "LET GO: CANCEL THE TAKE   HOLD: CLEAR" : "LET GO: UNDO LAYER   HOLD ON: CLEAR";
+            /* (no undo: PERFORM took its block, one layer, no loop; letting go says which) */
+            w = lp.state != LP_IDLE ? "LET GO: CANCEL THE TAKE   HOLD: CLEAR"
+                : lp.undo ? "LET GO: UNDO LAYER   HOLD ON: CLEAR" : "LET GO: NO UNDO   HOLD ON: CLEAR";
+            HOST_KEEP(host_hold, w);
         } else if (held >= (int32_t)REC_SHORT_MS) {
             w = "HOLD 3 S: UNDO LAYER   5 S: CLEAR LOOP";
         } else if (lp.first && lp.stop) {    /* a first layer, REC pressed again: it records on to its last bar's end */
             text_cat(t, "RECORDING ON TO ");
-            int_text(lp.bars, c);
-            text_cat(t, c);
-            text_cat(t, lp.bars == 1u ? " BAR" : " BARS");
+            bars_cat(t);
             w = t;
         } else {
             text_cat(t, "RECORDING LAYER ");
@@ -2963,9 +2979,17 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
         }
     }
     cv_text(4, 40, &FONT_T, lp.own ? "REC: LAYER  HELD 3 S: UNDO  5 S: CLEAR" : "ALGO: TRACK  PRESETS: SOUND", C_DIM);
-    {                                        /* where the track's sound is in the list: its category and place there */
-        char c[20];
-        cat_text(t->sound, c);
+    {                                        /* where the track's sound is in the list: its category and place there; */
+        char c[20];                          /* the loop's track: LOOP and its length (its own sound sleeps) */
+        if (on_t8l()) {
+            c[0] = 0;
+            text_cat(c, lp.has ? "LOOP " : "LOOP");
+            if (lp.has)
+                bars_cat(c);
+        } else {
+            cat_text(t->sound, c);
+        }
+        HOST_KEEP(host_corner, c);
         cv_text(236 - text_w(&FONT_T, c), 40, &FONT_T, c, C_GRAY);
     }
     cv_blit(0, 188);
@@ -3478,15 +3502,13 @@ void app_frame(void)
         ui.redraw = 1;
     }
     if (lp.done != ui.loop_seen && !lp.swap) {   /* a take is in, and the loop has moved (a block after) */
-        char a[24], n[8];
+        char a[24];
         ui.loop_seen = lp.done;
         a[0] = 0;
         if (lp.full) {                       /* a first layer that ended by itself */
             lp.full = 0;
-            int_text(lp.bars, n);
             text_cat(a, "LOOP FULL: ");
-            text_cat(a, n);
-            text_cat(a, lp.bars == 1u ? " BAR" : " BARS");
+            bars_cat(a);
         } else {
             layer_text(a, lp.layers);
             text_cat(a, " IN");
@@ -3637,18 +3659,27 @@ int app_expect(const char *what, int *got)
         *got = lp.has;
     else if (!strcmp(what, "loop_layers"))
         *got = lp.layers;
-    else if (!strncmp(what, "msg_", 4)) {    /* msg_TEXT: the header's message now has TEXT in it ('_' a space): 1, else 0 */
-        char t[64], w[48];
+    else if (!strncmp(what, "msg_", 4) || !strncmp(what, "scr_", 4)) {
+        /* msg_TEXT: the header's message now has TEXT in it ('_' a space): 1, else 0. scr_TEXT: the same of what is
+         * drawn: REC's hold line (held 3 s on) and the bottom line's corner (the track page) */
+        char t[72], w[48];
         uint32_t i;
+        const int msg = what[0] == 'm';
         for (i = 0; what[4u + i] && i < 47u; i++)
             w[i] = what[4u + i] == '_' ? ' ' : what[4u + i];
         w[i] = 0;
         t[0] = 0;
-        text_cat(t, ui.msg[0]);
-        text_cat(t, " ");
-        text_cat(t, ui.msg[1]);
-        *got = plat_ms() < ui.msg_until && strstr(t, w) != 0;
-        printf("  the header says: %s\n", plat_ms() < ui.msg_until ? t : "(nothing)");
+        if (msg && plat_ms() < ui.msg_until) {
+            text_cat(t, ui.msg[0]);
+            text_cat(t, " ");
+            text_cat(t, ui.msg[1]);
+        } else if (!msg) {
+            text_cat(t, ui.rec_t && plat_ms() - ui.rec_t >= REC_UNDO_MS ? host_hold : "");
+            text_cat(t, " | ");
+            text_cat(t, host_corner);
+        }
+        *got = t[0] && strstr(t, w) != 0;
+        printf(msg ? "  the header says: %s\n" : "  the screen says: %s\n", t[0] ? t : "(nothing)");
     }
     else if (!strcmp(what, "loop_undo"))     /* a layer can be taken off, */
         *got = lp.undo;
