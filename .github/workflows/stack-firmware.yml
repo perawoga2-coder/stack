@@ -74,16 +74,25 @@ jobs:
           TAG=$(gh release list -R "$GITHUB_REPOSITORY" --limit 20 --json tagName,isDraft --jq '[.[] | select(.isDraft|not) | select(.tagName|test("-test$")|not)][0].tagName')
           REL="${TAG#v}"
           mkdir -p ../rel && gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "stack-$REL.fwsc" -D ../rel --clobber
-          # the release keeps the identity it was built with (3.98-beta: FM-1_58, since 4.01-beta: FM-1_34): its
-          # front page is made from a copy of app/ whose fm1.toml says that identity
-          PROD=$(base/.venv/bin/python -c "import sys; sys.path.insert(0,'base/tools'); import make_site; print(make_site.product_of(open(sys.argv[1],'rb').read()))" "../rel/stack-$REL.fwsc")
-          RELAPP=app
-          if ! grep -q "^id_prefix = \"${PROD%??????}\"" app/fm1.toml; then
-            rm -rf ../app-rel && cp -r app ../app-rel
-            sed -i "s|^id_prefix = \"[^\"]*\"|id_prefix = \"${PROD%??????}\"|" ../app-rel/fm1.toml
-            RELAPP=../app-rel
+          # The front (install/, emu/, the manual) is the release's own source at its tag, so the emulator people try
+          # is the firmware the front installs (the branch may be ahead of the release: that is test/).
+          RELAPP=""
+          if git fetch -q --depth 1 origin "refs/tags/$TAG:refs/tags/$TAG" && git worktree add -q ../../relsrc "$TAG" \
+             && ln -s "$PWD/base" ../../relsrc/stack/base \
+             && (cd ../../relsrc/stack && base/.venv/bin/python base/tools/build.py app --web); then
+            RELAPP=../../relsrc/stack/app
+          else
+            # fallback: this branch's app/, with the release's identity (3.98-beta: FM-1_58, since 4.01-beta: FM-1_34)
+            echo "front: could not build $TAG's own source; the branch's emulator is used"
+            PROD=$(base/.venv/bin/python -c "import sys; sys.path.insert(0,'base/tools'); import make_site; print(make_site.product_of(open(sys.argv[1],'rb').read()))" "../rel/stack-$REL.fwsc")
+            RELAPP=app
+            if ! grep -q "^id_prefix = \"${PROD%??????}\"" app/fm1.toml; then
+              rm -rf ../app-rel && cp -r app ../app-rel
+              sed -i "s|^id_prefix = \"[^\"]*\"|id_prefix = \"${PROD%??????}\"|" ../app-rel/fm1.toml
+              RELAPP=../app-rel
+            fi
           fi
-          echo "front: $REL is $PROD (app: $RELAPP)"
+          echo "front: $REL (app: $RELAPP)"
           base/.venv/bin/python base/tools/make_site.py "$RELAPP" "../rel/stack-$REL.fwsc" "$REL" ../site
           base/.venv/bin/python base/tools/make_site.py app "app/build/stack-${{ steps.b.outputs.ver }}.fwsc" "${{ steps.b.outputs.ver }}" ../site-test
           mv ../site-test ../site/test
