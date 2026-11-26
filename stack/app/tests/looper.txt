@@ -323,6 +323,8 @@ shot looper_hold_early.png
 expect scr_HOLD_3_S:_UNDO_LAYER__5_S:_CLEAR_LOOP 1
 release REC
 wait 60
+# (4.10: let go before 3 s, the message says what a hold does here: an undo, a clear)
+expect msg_REC:_HOLD_3_S_UNDO,_5_S_CLEAR 1
 expect loop_layers 3
 expect loop_state 0
 expect loop_undo 1
@@ -399,10 +401,17 @@ expect loop_own 1
 wait 700
 expect loop_state 2
 # (4.10: from half a second the hold's line shows, as in the other cases; the take's bar stays until 3 s)
-expect scr_HOLD_3_S:_CANCEL_TAKE__5_S:_CLEAR_LOOP 1
+expect scr_HOLD_3_S:_CANCEL_TAKE 1
+# (4.10: no loop yet: 5 s cancels the take too, there is no loop to clear; the line does not promise one)
+expect scr_5_S:_CLEAR 0
 shot looper_hold_take.png
 release REC
 wait 100
+# (4.10: let go before 3 s in a first layer's take, the message says what a hold does there: it cancels the take,
+# and with no loop there is no 5 s clear to promise)
+expect msg_REC:_HOLD_3_S_CANCEL 1
+expect msg_5_S_CLEAR 0
+expect msg_UNDO 0
 expect loop_state 2
 # held from its start for 3 s and let go: dropped; track 8 stays its own
 tap PLAY
@@ -414,7 +423,8 @@ press REC
 wait 3300
 expect loop_state 2
 # (4.09: the 3 s line says what letting go does, as looper_undo has it: the take goes; HOLD ON as the others say)
-expect scr_LET_GO:_CANCEL_TAKE__HOLD_ON:_CLEAR 1
+expect scr_LET_GO:_CANCEL_TAKE 1
+expect scr_HOLD_ON 0
 release REC
 wait 100
 expect loop_state 0
@@ -942,7 +952,8 @@ press REC
 wait 1000
 expect loop_state 2
 expect loop_has 0
-expect scr_HOLD_3_S:_CANCEL_TAKE__5_S:_CLEAR_LOOP 1
+expect scr_HOLD_3_S:_CANCEL_TAKE 1
+expect scr_5_S:_CLEAR 0
 wait 4100
 expect msg_TAKE_CANCELLED 1
 expect msg_LOOP_CLEARED 0

@@ -2429,6 +2429,10 @@ static void input(void)
                     lp.go = ui.rec_take;     /* (a layer on top waited for this: it is taken) */
                 else if (held >= (int32_t)REC_UNDO_MS)
                     looper_undo();
+                else if (LP_TAKE_LIVE)       /* (as the hold's line: 3 s lets the take go; 5 s clears a loop there is) */
+                    app_say(lp.has ? "REC: HOLD 3 S CANCEL," : "REC: HOLD 3 S", lp.has ? "5 S CLEAR" : "CANCEL");
+                else if (!lp.has)
+                    app_say("NO LOOP:", "NOTHING TO UNDO");
                 else
                     app_say("REC: HOLD 3 S UNDO,", "5 S CLEAR");
             }
@@ -2725,7 +2729,8 @@ static void draw_header(void)
             } else {
                 text_cat(t, u ? "LET GO: " : "HOLD 3 S: ");
                 text_cat(t, take ? "CANCEL TAKE" : lp.undo ? "UNDO LAYER" : "NO UNDO");
-                text_cat(t, u ? "  HOLD ON: CLEAR" : "  5 S: CLEAR LOOP");
+                if (lp.has)                  /* (a first layer's take: at 5 s too it is only the take that goes) */
+                    text_cat(t, u ? "  HOLD ON: CLEAR" : "  5 S: CLEAR LOOP");
             }
             HOST_KEEP(host_hold, w);
         } else if (lp.first && lp.stop) {    /* a first layer, REC pressed again: it records on to its last bar's end */

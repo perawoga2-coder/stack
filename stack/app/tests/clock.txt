@@ -748,3 +748,10 @@ expect scr_HOLD_ON 0
 release REC
 clock 5 20
 expect msg_NO_LAYER_TO_UNDO 1
+# (4.10: let go before 3 s with no loop and no take, the message says so as the hold's line does: NO LOOP)
+press REC
+clock 60 20
+release REC
+clock 5 20
+expect msg_NO_LOOP:_NOTHING_TO_UNDO 1
+expect msg_5_S_CLEAR 0
