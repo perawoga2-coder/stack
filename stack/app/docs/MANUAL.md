@@ -228,21 +228,24 @@ Nothing waits for a bar, and you do not have to press PLAY first.
    after one round of the loop, or when you press REC again. The bar on the screen shows how much of the round is
    left.
 
-| REC | What it does |
+| Button | What it does |
 |---|---|
-| Short press (less than half a second) | Records a layer, from the press. While it records: ends it. |
-| Hold 3 seconds, then let go | Removes the last layer. Only one layer can be removed. |
-| Hold 5 seconds | Clears the whole loop. It happens at 5 seconds; you do not have to let go. |
-| Hold less than 3 seconds, then let go | Nothing. |
+| REC | Records a layer, from the press. While it records: ends it. REC is only for recording: holding it does nothing more. |
+| GLO held 3 seconds, then OCT− | Removes the last layer (or cancels the layer that is recording). Only one layer can be removed. |
+| GLO held 3 seconds, then OCT− twice | Clears the whole loop. |
 
-While you hold REC, a bar fills at the top of the screen. A mark shows the 3 seconds, and the text says what will
-happen. Before 3 seconds: `HOLD 3 S: UNDO LAYER  5 S: CLEAR LOOP`, or `HOLD 3 S: NO UNDO` when there is no layer
-that can be removed. After 3 seconds: `LET GO: UNDO LAYER  HOLD ON: CLEAR`, or `LET GO: NO UNDO`. While a layer
-records, letting go cancels it: `HOLD 3 S: CANCEL TAKE  5 S: CLEAR LOOP`, then `LET GO: CANCEL TAKE`. If you keep
-holding the press that started a first layer, it records on, and its recording-time bar stays until 3 seconds.
-Held to 5 seconds while a first layer records (no loop yet), only that layer goes, so the text there is only
-`HOLD 3 S: CANCEL TAKE`, then `LET GO: CANCEL TAKE`; at 5 seconds the screen says `TAKE CANCELLED`. With no loop at all the text says `NO LOOP: NOTHING TO UNDO OR CLEAR`.
+While a layer records on the TRACKS page, the track list gives way to a big recording panel: `REC` and the layer
+number, the seconds left, and a graph of what you record as it comes in, with a line at each bar. When you press
+REC to end a first layer, an orange line shows where it will stop. At the top of the screen a thick red bar shows
+the time left.
 
+To remove: hold GLO. After 3 seconds the screen says `OCT-: UNDO  TWICE: CLEAR`. Press OCT− once to remove the
+last layer; press it again (still holding GLO) to clear the whole loop. The music plays on while you do it. That
+OCT− does not change the octave. If you let go of GLO before 3 seconds, OCT− changes the octave as usual. Holding
+GLO also opens the GLO page; press GLO again to go back.
+
+- **No seam.** What still sounds when a layer ends (the tails of your notes) is laid on the loop where it comes
+  round, so the sound runs on through the loop's start without a dip or a click.
 - **The loop need not start on the first beat.** It starts where you pressed REC. Because its length is whole
   bars, it comes round at the same place of the bar every time.
 - **The length of the loop** is set by the first layer. The shortest loop is 1 bar. Later layers have the same
@@ -272,11 +275,6 @@ Held to 5 seconds while a first layer records (no loop yet), only that layer goe
   bottom line too, so the top of the screen keeps showing the recording.
 - The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.
-- The press that **starts** a layer on top must be a short one: let go of REC within half a second. If you hold
-  that press longer, it is a hold (undo or clear, see the table), the layer is dropped and the loop stays as it
-  was. So holding REC to remove a layer never records anything.
-- The press that **ends** a layer keeps that layer at once, however long you hold it. If you hold it for 3
-  seconds, the layer you just made is removed again.
 - Starting a new layer means the layer before it can no longer be removed.
 - If you stop the sequencer while a layer records, that layer is dropped.
 - When the FM-1 follows a clock (`CLOCK: BURGER` or `CLOCK: BT`), the clock starts the sequencer. REC while it is
@@ -321,9 +319,9 @@ effect on everything you hear, on all tracks at once. Hold the key: the effect i
 **PERFORM and the looper.** Keys 1 to 5 borrow memory from the looper.
 
 - While the looper records a layer, keys 1 to 6 and key 15 wait. They are dim on the screen.
-- If you use keys 1 to 5, the looper can no longer remove its last layer (REC held 3 seconds). The screen tells you once:
-  `PERFORM USED THE UNDO LAYER`. The loop itself is safe. Hold REC for an undo after that and the screen says
-  `NO UNDO: PERFORM USED IT` (while you hold: `LET GO: NO UNDO`). The next layer can be removed again.
+- If you use keys 1 to 5, the looper can no longer remove its last layer (GLO held 3 seconds, then OCT−). The
+  screen tells you once: `PERFORM USED THE UNDO LAYER`. The loop itself is safe. Try an undo after that and the
+  screen says `NO UNDO: PERFORM USED IT`. The next layer can be removed again.
 
 **LATCH.** On the GLO page, K4 sets PERFORM LATCH to ON or OFF. It starts OFF.
 

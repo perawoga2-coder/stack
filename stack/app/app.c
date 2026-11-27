@@ -3290,7 +3290,7 @@ static void cover_band(int32_t y0)
 
 static void draw_title(void)                 /* in the tracks' place; the keys, the knobs and the header work meanwhile */
 {
-    const felucca_font_t *big = text_w(&FONT_L, APP_NAME) <= 122 ? &FONT_L : &FONT_M;
+    const felucca_font_t *big = &FONT_M;         /* (4.15: FONT_L is not built in: its 20 KB went to the code) */
     cv_begin(240, 80, C_BLACK);
     cover_band(0);
     cv_text(116 + (124 - text_w(big, APP_NAME)) / 2, 40, big, APP_NAME, C_ORANGE);
@@ -3330,7 +3330,7 @@ static void draw_rec(void)
     rec_x = x;
     cv_begin(240, 80, C_BLACK);                  /* REC, the layer, the seconds left */
     cv_rect(10, 14, 16, 16, (plat_ms() >> 8 & 1u) ? RGB(255, 40, 40) : RGB(120, 20, 20));
-    cv_text(34, 6, &FONT_L, "REC", RGB(255, 40, 40));
+    cv_text(34, 8, &FONT_M, "REC", RGB(255, 40, 40));
     t[0] = 0;
     text_cat(t, "LAYER ");
     int_text(lp.layers + 1, c);
@@ -3343,7 +3343,7 @@ static void draw_rec(void)
         c[1] = (char)('0' + ds % 10u);
         c[2] = 0;
         text_cat(t, c);
-        cv_text(232 - text_w(&FONT_L, t), 6, &FONT_L, t, C_ORANGE);
+        cv_text(232 - text_w(&FONT_M, t), 8, &FONT_M, t, C_ORANGE);
         cv_text(232 - text_w(&FONT_M, "S LEFT"), 46, &FONT_M, "S LEFT", C_GRAY);
     }
     cv_blit(0, 28);

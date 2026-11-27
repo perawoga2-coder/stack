@@ -7,6 +7,7 @@
 #include "plat.h"
 
 #define APP_NAME "STACK"
+#define APP_BIG_FONT FONT_M              /* the splash's name, the panel's screens: FONT_L's 20 KB given to the code (4.15) */
 #include "stack_version.h"               /* STACK_VERSION: stack/VERSION, by tools/gen_version.py at every build */
 #ifndef APP_VERSION                      /* (a release build passes the same, from the same file: --release) */
 #define APP_VERSION STACK_VERSION
