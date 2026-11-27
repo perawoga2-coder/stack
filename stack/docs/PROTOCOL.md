@@ -182,7 +182,8 @@ Numbers of more than 7 bits are sent low 7 bits first.
 
 **Asking for piece 0 makes the record** from the FM-1's state at that moment (NOT from what SAVE last kept); the
 other pieces are of that same record. Ask for piece 0 first, then 1 to pieces − 1. A piece past the end is answered
-with no data. The record is 800 bytes (7 pieces). All numbers in it are little-endian.
+with no data. The record is 1568 bytes (13 pieces; 800 bytes, 7 pieces, before 4.16-beta: take the length and
+the bytes a track from the head). All numbers in it are little-endian.
 
 The head, 32 bytes:
 
@@ -191,10 +192,12 @@ The head, 32 bytes:
 | 0 | 4 | `STKD` |
 | 4 | 1 | the record's version: 1 |
 | 5 | 1 | tracks: 8 |
-| 6 | 1 | bytes a track: 96 |
+| 6 | 1 | bytes a track: 192 (96 before 4.16-beta) |
 | 7 | 1 | flags: bit 0 there is a loop, bit 1 the pattern plays, bit 2 the FM-1 follows a clock, bit 3 the looper is on track 7 (since 4.04-beta; 0: track 8) |
-| 8 | 2 | the record's length in bytes (800) |
+| 8 | 2 | the record's length in bytes (1568; 800 before 4.16-beta) |
 | 10 | 4 | CRC-32 (the usual one, as zlib's) of the bytes from offset 16 to the end |
+| 14 | 1 | the pattern's pages, 1 to 4 (GLO's LENGTH, since 4.16-beta; 0 before: one page) |
+| 15 | 1 | GLO's PLAY MODE: 0 CHAIN (the pages one after another), 1 PAGE (one page, over and over) |
 | 16 | 1 | tempo, BPM |
 | 17 | 1 | time signature: 0 2/4, 1 3/4, 2 4/4, 3 6/8, 4 7/8 |
 | 18 | 1 | steps in the pattern: 8, 12, 14 or 16 |
@@ -203,7 +206,7 @@ The head, 32 bytes:
 | 21 | 1 | the loop's layers |
 | 22 | 10 | the firmware's version as text, e.g. `4.0-BETA` |
 
-Then eight tracks of 96 bytes, T1 first:
+Then eight tracks of 192 bytes (96 before 4.16-beta), T1 first:
 
 | Offset | Size | What |
 |---|---|---|
@@ -219,6 +222,13 @@ Then eight tracks of 96 bytes, T1 first:
 | 56 | 16 | steps 1 to 16: 1 on, 0 off (only the first "steps in the pattern" play) |
 | 72 | 16 | each step's MIDI note (60 is middle C; a hit ignores it) |
 | 88 | 8 | the category as text, zero-padded: `DRUMS`, `BASS`, `KEYS`, `PAD`, `LEAD`, `FX`, `MY`, `LOOP`, or empty |
+| 96 | 32 | page 2 (since 4.16-beta): its steps 16, then their notes 16, as at 56 and 72 |
+| 128 | 32 | page 3 |
+| 160 | 32 | page 4 |
+
+**Pages (since 4.16-beta).** A pattern is up to four pages of steps, a page a bar; the head's byte 14 says how many
+play. Offsets 56 and 72 are page 1. A page past byte 14 is kept by the FM-1 (a LENGTH made shorter) but does not
+play. An app of before 4.16-beta that reads offsets 56 and 72 reads page 1.
 
 **Which track holds the loop (since 4.04-beta).** The loop's first layer is track 8's; each time a layer is in, the
 loop moves to the other of tracks 8 and 7 (8, 7, 8, ...). An undo or a cancelled take does not move it; a clear

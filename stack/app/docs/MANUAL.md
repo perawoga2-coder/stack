@@ -30,10 +30,12 @@ This is the page you see after the start. It lists the eight tracks, T1 to T8.
 | PRESETS knob | Changes the sound of the selected track. |
 | The keys | Play the selected track. |
 | OCT− / OCT+ | Move the keys one octave down or up. They act when you let go. |
+| FX + black keys 1–4 | Hold FX and press one of the first four black keys: the pattern goes on from page 1–4 at the next bar. See "Long patterns". |
 | K1 PITCH | Tunes the track, in semitones, −24 to +24. |
 | K2 FILTER | A DJ filter. Left closes a low-pass. Right opens a high-pass. The middle is OFF. |
 | K3 DECAY | How long the sound rings. For a drum: how fast it fades. For a held sound: how fast it lets go. |
-| K4 LEVEL | The track's volume. |
+| K4 PAGE | The page of steps you see and edit, 1 to 4. See "Long patterns". |
+| OCT− held + K4 | LEVEL: the track's volume. Letting go of OCT− then does not move the octave. |
 | MASTER | The volume of the FM-1's speaker and headphone jack. |
 | PLAY | Starts and stops the sequencer. |
 | SELECT knob | The tempo, 40 to 240 BPM. One click is 1 BPM. It works on every page. |
@@ -73,13 +75,41 @@ Press SEQ to open the step page for the selected track. Press SEQ again to go ba
 - Press PLAY. The steps that are on play in a loop. The step that sounds lights up.
 - A small mark under a step shows where a beat starts.
 
-All eight tracks share the same pattern length. The length comes from the time signature (EDIT page 2).
+All eight tracks share the same pattern length. The steps in a bar come from the time signature (EDIT page 2).
+K4 picks the page of steps (see "Long patterns"); the step numbers on the screen go on from page to page: page 2's
+first step is 17.
+
+## Long patterns (since 4.16)
+
+A pattern can be up to four pages of steps. One page is one bar: 16 steps in 4/4.
+
+- **K4 picks the page** on the play page and on the step page. The screen shows `PAGE 2/4` (in K4's place).
+- **A page you reach for the first time is a copy of the page before it,** for all tracks. Then change it.
+- **The pattern is as long as the furthest page you reached.** If you never turn to page 2, the pattern stays 16
+  steps. Turn to page 2: 32 steps. All tracks have the same length.
+- **Shorter again:** GLO page, K3 LENGTH. The pages you cut are kept, not deleted: make the pattern longer again
+  and they come back as they were.
+- **LEVEL** moved: hold OCT− and turn K4.
+
+How the pages play is GLO's K2 PLAY MODE:
+
+| PLAY MODE | What plays |
+|---|---|
+| CHAIN | All pages, one after the other, then page 1 again. Hold FX and press black key 1, 2, 3 or 4: the pattern jumps to that page when the bar ends, and goes on from there. While FX is held, those four black keys play no note. |
+| PAGE | Only the page K4 shows, over and over. Turn K4 to another page: it plays when the bar ends. |
+
+- When stopped, FX + a black key picks the page PLAY starts on (CHAIN). Otherwise PLAY starts on page 1 (CHAIN) or
+  on the page shown (PAGE).
+- A page past LENGTH is not played: FX + its black key says `NOT IN THE PATTERN`.
+- The looper, the ARP and the LFOs keep to the bar as before: a page is a bar to them.
+- **FX** opens its page when you let it go. If you pressed one of the four black keys while holding it, it does not.
 
 ## FX
 
 ![The FX page](img/fx.png)
 
-Press FX to open the page. Press FX again for page 2, the EQ (below). Press FX once more to go back to the tracks.
+Press FX to open the page (since 4.16 it opens when you let FX go). Press FX again for page 2, the EQ (below). Press
+FX once more to go back to the tracks.
 Each track has two effect slots, A and B.
 
 | Knob | What it does |
@@ -273,7 +303,7 @@ GLO also opens the GLO page; press GLO again to go back.
   Selecting T8L or T7L only to set the loop's LEVEL says nothing.
 - While a layer records, the name of a page you open (`EDIT PAGE 2`, `FX PAGE`, `ENV PAGE` and so on) shows on the
   bottom line too, so the top of the screen keeps showing the recording.
-- The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
+- The loop has its own LEVEL: OCT− held + K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.
 - Starting a new layer means the layer before it can no longer be removed.
 - If you stop the sequencer while a layer records, that layer is dropped.
@@ -331,7 +361,7 @@ effect on everything you hear, on all tracks at once. Hold the key: the effect i
 - SEL and OCT− together switch all effects off.
 - LATCH itself is saved by SAVE. The effects are never saved: after a restart they are all off.
 
-## GLO: Bluetooth and LATCH
+## GLO: Bluetooth, PLAY MODE, LENGTH and LATCH
 
 ![The GLO page](img/glo.png)
 
@@ -339,9 +369,10 @@ Press GLO to open the page. Press GLO again to go back.
 
 | Control | What it does |
 |---|---|
-| K1 BLUETOOTH | ON or OFF. |
-| STATUS | CONNECTED, WAITING or OFF. |
-| REC | Disconnects. The FM-1 can then be found again. |
+| K1 BLUETOOTH | ON or OFF. After ON the line says CONNECTED, CONNECTING or WAITING. |
+| K2 PLAY MODE | CHAIN or PAGE. See "Long patterns". |
+| K3 LENGTH | The pattern's pages, 1 to 4 bars, for all tracks. Pages cut are kept. |
+| REC | Disconnects Bluetooth. The FM-1 can then be found again. |
 | K4 PERFORM LATCH | ON or OFF. See PERFORM. |
 
 Over Bluetooth the FM-1 sends its key notes and its clock, and it plays notes it receives. A small `BT` in the top
@@ -371,7 +402,8 @@ Burger Studio is Maker Hip's app. It sends samples to the FM-1 over the USB cabl
 ## VACUUM: the whole song into Burger Studio
 
 Burger Studio can pull your whole STACK song off the FM-1: all eight tracks with their sounds, knobs and steps, the
-tempo, the time signature, the swing, and the loop (and which track holds it, 7 or 8).
+tempo, the time signature, the swing, the pages (since 4.16; Burger Studio 3.64 reads them), and the loop (and
+which track holds it, 7 or 8).
 
 - Connect the FM-1 with the USB cable and press VACUUM FM-1 in the app.
 - You do nothing on the FM-1. It works on any page, playing or stopped.
@@ -385,8 +417,9 @@ tempo, the time signature, the swing, and the loop (and which track holds it, 7 
 
 Press SAVE to save your song. The screen says `SAVED`.
 
-What is saved: every track's sound and knobs, FX, EQ, ENV, LFO, EDIT, ARP, the steps and their notes, the tempo, the
-time signature, the swing, and Bluetooth on or off.
+What is saved: every track's sound and knobs, FX, EQ, ENV, LFO, EDIT, ARP, the steps and their notes on all four
+pages, LENGTH and PLAY MODE, the tempo, the time signature, the swing, and Bluetooth on or off. A song saved before
+4.16 loads as one page.
 
 What is **not** saved: the loop, and the samples themselves. Tracks 7 and 8 are saved with their own sounds,
 knobs and steps, also while the loop is on one of them.

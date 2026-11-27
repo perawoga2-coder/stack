@@ -1,0 +1,251 @@
+# STACK in the host simulator: the pattern's pages (4.16). KNOB 4 on the tracks' and the steps' pages picks the page
+# of steps shown, 1 to 4 (16 steps each, a page a bar); a page reached the first time is a copy of the one before, and
+# the pattern is as long as the furthest page reached, the same for all tracks. OCT- held + KNOB 4 is LEVEL (letting
+# OCT- go then moves no octave). GLO: KNOB 2 PLAY MODE (CHAIN: page after page; PAGE: the page shown, over and over,
+# a change from the next bar), KNOB 3 LENGTH (shorter: the pages cut are kept). FX held + black keys 1 to 4: CHAIN
+# goes on from that page at the next bar (no note; FX opens its page when let go, and not after that). SAVE keeps
+# all four pages.
+#   app/build/host/stack_host app/tests/pages.txt app/build/host
+master 4096
+wait 2200
+expect track 1
+expect seq_pages 1
+expect seq_view 1
+expect seq_made 1
+expect seq_mode 0
+# --- the page shown: KNOB 4. Page 1's step 1 on, then page 2: a copy of page 1
+tap SEQ
+wait 40
+expect page 1
+key w0 down 100
+wait 20
+key w0 up
+wait 40
+expect step1 60
+turn K4 1
+wait 40
+expect seq_view 2
+expect seq_pages 2
+expect seq_made 2
+expect msg_PAGE_2/4 1
+expect step17 60
+shot pages_step_page2.png
+# a step on page 2 is page 2's own (STEP 21); page 1's 5 stays off
+key w4 down 100
+wait 20
+key w4 up
+wait 40
+expect step21 60
+expect step5 0
+expect msg_STEP_21_ON 1
+# a step held + KNOB 1 is its note, on the page shown
+key w4 down 100
+wait 20
+turn K1 2
+wait 20
+key w4 up
+wait 40
+expect step21 62
+expect step5 0
+# back to page 1: the pattern stays two pages long
+turn K4 -1
+wait 40
+expect seq_view 1
+expect seq_pages 2
+# all the way: KNOB 4 stops at page 4; pages 3 and 4 copies (page 2's step 5 is 37 and 53 there)
+turn K4 10
+wait 40
+expect seq_view 4
+expect seq_pages 4
+expect seq_made 4
+expect step37 62
+expect step53 62
+expect step49 60
+turn K4 -10
+wait 40
+expect seq_view 1
+# every track is that long: track 2's page 3 is there too (empty, as its page 1)
+turn ALGO 1
+wait 40
+expect track 2
+expect step33 0
+turn ALGO -1
+wait 40
+tap SEQ
+wait 40
+expect page 0
+# --- OCT- held + KNOB 4: LEVEL, the page stays; OCT- let go moves no octave
+expect level 80
+expect octave 0
+press OCT-
+turn K4 -10
+wait 20
+release OCT-
+wait 40
+expect level 70
+expect seq_view 1
+expect octave 0
+# OCT- alone still moves the octave
+tap OCT-
+wait 40
+expect octave -1
+tap OCT+
+wait 40
+expect octave 0
+# --- GLO's LENGTH: three pages; page 4 is kept
+tap GLO
+wait 40
+expect page 8
+turn K3 -1
+wait 40
+expect seq_pages 3
+expect seq_made 4
+expect msg_LENGTH_(ALL_TRACKS):_3_BARS 1
+shot pages_glo.png
+turn K3 -5
+wait 40
+expect seq_pages 1
+turn K3 3
+wait 40
+expect seq_pages 4
+expect step53 62
+turn K3 -1
+wait 40
+expect seq_pages 3
+tap GLO
+wait 40
+expect page 0
+# --- CHAIN (as it starts): page after page, a bar each (4/4 at 120: 2 s a bar), then page 1 again
+tap PLAY
+wait 1000
+expect playing 1
+expect seq_pg 1
+wait 2000
+expect seq_pg 2
+wait 2000
+expect seq_pg 3
+wait 2000
+expect seq_pg 1
+# FX held + black key 3: page 3 from the next bar; no note, and FX let go opens no page
+press FX
+key b2 down 100
+wait 20
+expect msg_PAGE_3/4_FROM_THE_NEXT_BAR 1
+key b2 up
+release FX
+wait 40
+expect page 0
+expect seq_pg 1
+wait 1200
+expect seq_pg 3
+wait 2000
+expect seq_pg 1
+wait 2000
+expect seq_pg 2
+# black key 4: page 4 is not in the pattern (LENGTH 3)
+press FX
+key b3 down 100
+wait 20
+expect msg_PAGE_4/4_NOT_IN_THE_PATTERN 1
+key b3 up
+release FX
+wait 40
+wait 2000
+expect seq_pg 3
+tap PLAY
+wait 100
+expect playing 0
+# stopped: FX + black key 1 plays no note; the page asked for is the first to play
+press FX
+key b1 down 100
+wait 40
+expect voices 0
+expect msg_PAGE_2/4_PLAYS_FIRST 1
+key b1 up
+release FX
+wait 40
+expect page 0
+tap PLAY
+wait 500
+expect seq_pg 2
+wait 2000
+expect seq_pg 3
+tap PLAY
+wait 100
+# FX alone opens its page when it is let go
+press FX
+wait 100
+expect page 0
+release FX
+wait 40
+expect page 2
+tap FX
+wait 40
+tap FX
+wait 40
+expect page 0
+# FX held: a black key past the fourth is a note as always (and FX let go opens its page, as alone)
+press FX
+key b4 down 100
+wait 40
+expect voices 1
+key b4 up
+release FX
+wait 300
+expect page 2
+tap FX
+wait 40
+tap FX
+wait 40
+expect page 0
+# --- PAGE: the page KNOB 4 shows, over and over; a change from the next bar
+tap GLO
+wait 40
+turn K2 1
+wait 40
+expect seq_mode 1
+expect msg_PLAY_MODE:_PAGE 1
+tap GLO
+wait 40
+tap PLAY
+wait 1000
+expect seq_pg 1
+wait 2000
+expect seq_pg 1
+turn K4 1
+wait 40
+expect seq_view 2
+expect seq_pg 1
+wait 1200
+expect seq_pg 2
+wait 2000
+expect seq_pg 2
+# FX + a black key in PAGE: KNOB 4 picks
+press FX
+key b0 down 100
+wait 20
+expect msg_KNOB_4_PICKS_THE_PAGE 1
+key b0 up
+release FX
+wait 40
+wait 2000
+expect seq_pg 2
+tap PLAY
+wait 200
+expect lim_clips 0
+# --- SAVE keeps the four pages, LENGTH, PLAY MODE
+tap SAVE
+wait 100
+expect msg_SAVED 1
+reboot
+wait 2200
+expect seq_pages 3
+expect seq_made 4
+expect seq_mode 1
+expect seq_view 1
+expect step1 60
+expect step17 60
+expect step21 62
+expect step53 62
+expect step5 0
+expect level 70

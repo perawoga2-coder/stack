@@ -272,8 +272,21 @@ static const uint16_t SIG_BEATS[NSIG] = {0x0011, 0x0111, 0x1111, 0x0041, 0x0111}
 #define NFIT 6u
 static const char *const FIT_NAME[NFIT] = {"OFF", "1/4 BAR", "1/2 BAR", "1 BAR", "2 BARS", "4 BARS"};
 static const float FIT_BARS[NFIT] = {0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f};
-static volatile uint8_t step_on[NTRK][NSTEP];
-static volatile uint8_t step_note[NTRK][NSTEP];   /* MIDI note; a drum plays its own pitch */
+/* 4.16: a pattern of up to four pages of steps, a page a bar (KNOB 4 on the tracks' and the steps' pages picks the page
+ * shown; a page reached the first time is a copy of the one before). The pages are bars to everything else: the
+ * looper, the LFOs and the ARP keep to the bar as before */
+#define NPAGE 4u
+#define NSTEPS (NPAGE * NSTEP)
+static volatile uint8_t step_on[NTRK][NSTEPS];     /* page p's step s: [p * NSTEP + s] */
+static volatile uint8_t step_note[NTRK][NSTEPS];   /* MIDI note; a drum plays its own pitch */
+static volatile uint8_t seq_pages = 1;       /* the pattern's pages (GLO's LENGTH), the same for all tracks */
+static uint8_t seq_made = 1;                 /* the pages that have been made (one LENGTH cut is kept, not cleared) */
+static volatile uint8_t seq_mode;            /* GLO's PLAY MODE: SEQ_CHAIN, SEQ_PAGE */
+enum { SEQ_CHAIN, SEQ_PAGE };
+static volatile uint8_t seq_view;            /* the page KNOB 4 shows (PAGE: the one that plays) */
+static volatile uint8_t seq_pg;              /* the page playing */
+static volatile int8_t seq_jump = -1;        /* CHAIN: the page FX + a black key asked for, from the next bar (-1 none) */
+static volatile uint8_t seq_first;           /* the pattern has just started: its first bar is its first page */
 
 /* the transport: the main loop asks, the audio interrupt runs it */
 #define SEQ_BPM 120.0f                   /* fixed in this version */
@@ -733,11 +746,24 @@ volatile uint8_t ui_step_isr;                /* the step page is up */
 
 static void seq_fire(uint32_t step, uint32_t delay)
 {
-    uint32_t t;
+    uint32_t t, i;
+    if (!step && !seq_first) {               /* a bar starts: its page. PAGE: the one shown; CHAIN: the next one, or */
+        if (seq_mode == SEQ_PAGE)            /* the one FX + a black key asked for */
+            seq_pg = seq_view;
+        else if (seq_jump >= 0)
+            seq_pg = (uint8_t)seq_jump;
+        else
+            seq_pg = (uint8_t)(seq_pg + 1u);
+        seq_jump = -1;
+        if (seq_pg >= seq_pages)             /* (past the pattern's LENGTH: from its first page) */
+            seq_pg = 0;
+    }
+    seq_first = 0;
+    i = (uint32_t)seq_pg * NSTEP + step;
     for (t = 0; t < NTRK; t++) {
         voice_release(t, 0, 1);              /* the step before lets go */
-        if (step_on[t][step])
-            voice_start(t, step_note[t][step], 100, delay, 1, 0);
+        if (step_on[t][i])
+            voice_start(t, step_note[t][i], 100, delay, 1, 0);
     }
     seq_step_now = (uint8_t)step;
 }
@@ -1036,7 +1062,16 @@ _Static_assert(NTRK == 8u, "fx.c's per-track state is for eight tracks");
 static float rb[APP_BLOCK];                  /* a track's voices that a take records (played by hand) */
 static float recf[NTRK][4];                  /* and the track's FILTER on them alone */
 static fx_slot_t recx[NTRK][2];              /* and its OVERDRIVE, LO-FI (4.05: the take hears the effects) */
-static void seq_start_hook(void) { lp.bar = (uint8_t)(lp.bars - 1u); lp.resync = 1; }
+static void seq_start_hook(void)             /* the pattern starts: the looper's loop with it; and its first page */
+{
+    lp.bar = (uint8_t)(lp.bars - 1u);
+    lp.resync = 1;
+    seq_pg = (uint8_t)(seq_mode == SEQ_PAGE ? seq_view : seq_jump >= 0 ? (uint32_t)seq_jump : 0u);
+    if (seq_pg >= seq_pages)
+        seq_pg = 0;
+    seq_jump = -1;
+    seq_first = 1;
+}
 static uint8_t *lvl_of(uint32_t t) { return t == lp.trk && lp.own ? &lp.lvl : &trk[t].level; }   /* LEVEL: the loop has its own */
 
 /* what a track's envelope is this block (render_part works it out from the track's knobs) */
@@ -1563,11 +1598,15 @@ static void defaults(void)
         trk[t].fx[0] = trk[t].fx[1] = FX_OFF;
         trk[t].fxk[0] = trk[t].fxk[1] = 0;
         trk[t].eq[0] = trk[t].eq[1] = trk[t].eq[2] = trk[t].eq[3] = 0;
-        for (i = 0; i < NSTEP; i++) {
+        for (i = 0; i < NSTEPS; i++) {
             step_on[t][i] = 0;
             step_note[t][i] = 60;
         }
     }
+    seq_pages = seq_made = 1;                /* one page, CHAIN */
+    seq_view = seq_pg = 0;
+    seq_jump = -1;
+    seq_mode = SEQ_CHAIN;
 }
 
 static uint8_t my_again;                     /* the scans after the start done so far (my_frame) */
@@ -1584,7 +1623,12 @@ static uint32_t my_t0;                       /* plat_ms at the start */
 #define SONG_TRK 68u                         /* bytes a track: its sound 8, its settings 25, its steps 16 and their notes 16;
                                               * since 4.06 the EQ in the three left (33, 66, 67: eq_word) */
 #define SONG_LEN (16u + NTRK * SONG_TRK)
-static uint8_t song_buf[SONG_LEN];
+/* 4.16: pages 2 to 4 after it, 32 bytes a track a page (its steps 16, their notes 16: page 2's tracks, then page 3's,
+ * page 4's); the head's bytes 13, 14, 15 (0 till then) the pages: LENGTH, made, PLAY MODE. A song of before (SONG_LEN
+ * bytes) is one page; a STACK of before reads the first SONG_LEN of a longer one, the first page */
+#define SONG_PG 32u
+#define SONG_LEN2 (SONG_LEN + (NPAGE - 1u) * NTRK * SONG_PG)
+static uint8_t song_buf[SONG_LEN2];
 static struct { uint8_t slot; uint32_t crc; } song_my[NTRK];   /* a track waits for its sample (slot 1 + k; 0: none) */
 static uint8_t song_drawn = 1;               /* 0: a track got its sample, the screen is to show it */
 
@@ -1638,7 +1682,7 @@ static void eq_unword(uint32_t t, uint32_t w)
 
 static int song_save(void)                   /* 0: kept */
 {
-    uint32_t t, i;
+    uint32_t t, i, k;
     memset(song_buf, 0, sizeof song_buf);
     put32(song_buf, SONG_MAGIC);
     song_buf[4] = SONG_VER;
@@ -1649,6 +1693,9 @@ static int song_save(void)                   /* 0: kept */
     song_buf[10] = seq_swing;
     song_buf[11] = bt_on;
     song_buf[12] = pf_latch;                 /* (3.99: a byte that was 0 before: an older song says OFF) */
+    song_buf[13] = seq_pages;
+    song_buf[14] = seq_made;
+    song_buf[15] = seq_mode;
     for (t = 0; t < NTRK; t++) {
         uint8_t *p = song_buf + 16u + t * SONG_TRK, *q = p + 8;
         const uint32_t li = trk[t].sound;
@@ -1669,8 +1716,15 @@ static int song_save(void)                   /* 0: kept */
         p[33] = (uint8_t)i;
         p[66] = (uint8_t)(i >> 8);
         p[67] = (uint8_t)(i >> 16);
+        for (k = 1; k < NPAGE; k++) {        /* pages 2 to 4 (4.16) */
+            uint8_t *g = song_buf + SONG_LEN + ((k - 1u) * NTRK + t) * SONG_PG;
+            for (i = 0; i < NSTEP; i++) {
+                g[i] = step_on[t][k * NSTEP + i] ? 1u : 0u;
+                g[NSTEP + i] = step_note[t][k * NSTEP + i];
+            }
+        }
     }
-    return plat_store_save(OBJ_SETTINGS, song_buf, SONG_LEN);
+    return plat_store_save(OBJ_SETTINGS, song_buf, SONG_LEN2);
 }
 
 static void song_my_place(void)              /* the tracks that wait for a sample of the app's: is it there, the same? */
@@ -1687,11 +1741,19 @@ static void song_my_place(void)              /* the tracks that wait for a sampl
 
 static int song_load(void)                   /* 1: a song was there and is in place; 0: none (or not one of ours) */
 {
-    uint32_t t, i;
+    uint32_t t, i, k, pages;
+    int got;
     memset(song_my, 0, sizeof song_my);
-    if (plat_store_load(OBJ_SETTINGS, song_buf, SONG_LEN) != (int)SONG_LEN || rd32(song_buf) != SONG_MAGIC ||
+    got = plat_store_load(OBJ_SETTINGS, song_buf, SONG_LEN2);
+    if ((got != (int)SONG_LEN && got != (int)SONG_LEN2) || rd32(song_buf) != SONG_MAGIC ||
         song_buf[4] != SONG_VER || song_buf[5] != NTRK || song_buf[6] != SONG_TRK)
         return 0;
+    pages = got == (int)SONG_LEN2;           /* (a song of before 4.16: one page) */
+    seq_made = (uint8_t)(pages ? clamp(song_buf[14], 1, (int32_t)NPAGE) : 1);
+    seq_pages = (uint8_t)(pages ? clamp(song_buf[13], 1, seq_made) : 1);
+    seq_mode = (uint8_t)(pages && song_buf[15] == SEQ_PAGE ? SEQ_PAGE : SEQ_CHAIN);
+    seq_view = seq_pg = 0;
+    seq_jump = -1;
     seq_sf = 44100.0f * 60.0f / ((float)clamp(song_buf[8], 40, 240) * 4.0f);
     seq_sig = (uint8_t)(song_buf[9] < NSIG ? song_buf[9] : 2u);
     seq_len = SIG_LEN[seq_sig];
@@ -1718,6 +1780,13 @@ static int song_load(void)                   /* 1: a song was there and is in pl
             step_note[t][i] = (uint8_t)(p[50u + i] & 127u);
         }
         eq_unword(t, p[33] | (uint32_t)p[66] << 8 | (uint32_t)p[67] << 16);   /* (before 4.06: 0, no EQ) */
+        for (k = 1; k < NPAGE; k++) {        /* pages 2 to 4: a song of before has none (as new: off, C4) */
+            const uint8_t *g = song_buf + SONG_LEN + ((k - 1u) * NTRK + t) * SONG_PG;
+            for (i = 0; i < NSTEP; i++) {
+                step_on[t][k * NSTEP + i] = (uint8_t)(pages && g[i] != 0u);
+                step_note[t][k * NSTEP + i] = (uint8_t)(pages ? g[NSTEP + i] & 127u : 60u);
+            }
+        }
     }
     song_my_place();
     return 1;
@@ -1805,7 +1874,9 @@ static struct {
     uint8_t title;                       /* the title is up (the first TITLE_MS after a start) */
     uint8_t rec_take;                    /* this press of REC began a take */
     uint8_t glo_n;                       /* GLO held 3 s: 1, and one more for each OCT- since (4.15) */
-    uint8_t oct_eat;                     /* that OCT- was GLO's: its let-go moves no octave */
+    uint8_t oct_eat;                     /* that OCT- was GLO's, or held for KNOB 4's LEVEL: its let-go moves no octave */
+    uint8_t fx_eat;                      /* FX held: a black key asked for a page; its let-go opens no page (4.16) */
+    uint32_t fx_keys;                    /* the black keys FX took (their let-go is no note) */
     uint32_t glo_t;                      /* GLO went down (0: not held) */
     uint32_t loop_seen;                  /* takes finished that the screen has said */
     uint32_t loop_drawn;                 /* the looper's state as the screen shows it */
@@ -2023,6 +2094,43 @@ static void octave_step(int32_t d)
     app_say("OCTAVE", t);
 }
 
+/* 4.16: the pattern grows to n pages: a page new to it is a copy of the one before (all tracks); one made before and
+ * cut by LENGTH comes back as it was */
+static void seq_grow(uint32_t n)
+{
+    uint32_t t, i;
+    for (; seq_made < n; seq_made++)
+        for (t = 0; t < NTRK; t++)
+            for (i = 0; i < NSTEP; i++) {
+                step_on[t][seq_made * NSTEP + i] = step_on[t][(seq_made - 1u) * NSTEP + i];
+                step_note[t][seq_made * NSTEP + i] = step_note[t][(seq_made - 1u) * NSTEP + i];
+            }
+    if (n > seq_pages)
+        seq_pages = (uint8_t)n;
+}
+static void page_text(uint32_t p, char *s)   /* "PAGE 2/4" */
+{
+    char n[4];
+    s[0] = 0;
+    text_cat(s, "PAGE ");
+    int_text((int32_t)p + 1, n);
+    text_cat(s, n);
+    text_cat(s, "/4");
+}
+static void seq_ask(uint32_t p)              /* FX held + black key p + 1: CHAIN goes on from that page at the next bar */
+{
+    char a[16];
+    page_text(p, a);
+    if (seq_mode == SEQ_PAGE)
+        app_say("PLAY MODE PAGE:", "KNOB 4 PICKS THE PAGE");
+    else if (p >= seq_pages)
+        app_say(a, "NOT IN THE PATTERN");
+    else {
+        seq_jump = (int8_t)p;
+        app_say(a, seq_play_req ? "FROM THE NEXT BAR" : "PLAYS FIRST");
+    }
+}
+
 static void knob_turn(uint32_t k, int32_t e)
 {
     track_t *t = &trk[ui.sel];
@@ -2089,6 +2197,33 @@ static void knob_turn(uint32_t k, int32_t e)
                 if (!to && !ui.perform)
                     perform_off();           /* (LATCH off: what it held on goes off) */
                 app_say("PERFORM LATCH:", to ? "ON" : "OFF");
+            }
+        }
+        if (k == 1u) {                       /* KNOB 2 PLAY MODE (4.16): CHAIN the pages one after another; PAGE the one */
+            uint32_t to = e > 0;             /* KNOB 4 shows, over and over (a change: from the next bar) */
+            ui.hot = 1;
+            ui.hot_t = plat_ms();
+            if (to != seq_mode) {
+                seq_mode = (uint8_t)to;
+                seq_jump = -1;
+                app_say("PLAY MODE:", to ? "PAGE" : "CHAIN");
+            }
+        }
+        if (k == 2u) {                       /* KNOB 3 LENGTH (4.16): the pattern's pages; a page cut is kept */
+            int32_t to = clamp((int32_t)seq_pages + e, 1, (int32_t)NPAGE);
+            ui.hot = 2;
+            ui.hot_t = plat_ms();
+            if (to != (int32_t)seq_pages) {
+                char n[4];
+                if (to > (int32_t)seq_pages)
+                    seq_grow((uint32_t)to);
+                else
+                    seq_pages = (uint8_t)to;
+                if (seq_view >= seq_pages)
+                    seq_view = (uint8_t)(seq_pages - 1u);
+                int_text(to, n);
+                text_cat(n, to > 1 ? " BARS" : " BAR");
+                app_say("LENGTH (ALL TRACKS):", n);
             }
         }
         if (k == 0u) {
@@ -2175,7 +2310,7 @@ static void knob_turn(uint32_t k, int32_t e)
     }
     if (ui.page == PAGE_STEP && ui.held_step >= 0) {
         if (k == 0u) {                       /* a step held, KNOB 1: its note; the step is set */
-            uint32_t s = (uint32_t)ui.held_step;
+            uint32_t s = (uint32_t)seq_view * NSTEP + (uint32_t)ui.held_step;     /* (on the page shown) */
             int32_t old = step_note[ui.sel][s], to = clamp(old + e, 24, 96);
             const sound_t *snd = list_sound(t->sound);
             step_note[ui.sel][s] = (uint8_t)to;
@@ -2195,15 +2330,29 @@ static void knob_turn(uint32_t k, int32_t e)
     }
     ui.hot = (int8_t)k;
     ui.hot_t = plat_ms();
+    if (k == 3u && !(plat_buttons() >> B_OCTDN & 1u)) {     /* KNOB 4 (4.16): the page of steps shown, 1 to 4 */
+        int32_t to = clamp((int32_t)seq_view + e, 0, (int32_t)NPAGE - 1);
+        if (to != (int32_t)seq_view) {
+            seq_view = (uint8_t)to;
+            ui.held_step = -1;
+            if ((uint32_t)to >= seq_pages)   /* past the pattern's end: it grows to it, the new page a copy */
+                seq_grow((uint32_t)to + 1u);
+            page_text((uint32_t)to, a);
+            app_say(a, seq_mode == SEQ_PAGE && seq_play_req ? "PLAYS FROM THE NEXT BAR" : "");
+        }
+        ui.redraw = 1;
+        return;
+    }
     if (k == 0u) {
         t->pitch = (int8_t)clamp(t->pitch + e, -24, 24);
     } else if (k == 1u) {
         t->filt = (int8_t)clamp(t->filt + e, -FILT_MAX, FILT_MAX);
     } else if (k == 2u) {
         t->decay = (uint8_t)clamp(t->decay + e, 0, 100);
-    } else {
+    } else {                                 /* OCT- held + KNOB 4: LEVEL (4.16; letting OCT- go then is no octave) */
         uint8_t *l = lvl_of(ui.sel);         /* (the loop's track: the loop's own level) */
         *l = (uint8_t)clamp(*l + e, 0, 100);
+        ui.oct_eat = 1;
     }
     ui.redraw = 1;
 }
@@ -2250,7 +2399,7 @@ static void perform_off(void)                /* every effect off */
 #define HOME_HOLD_MS 500u                 /* HOME held this long opens the city view */
 static void input(void)
 {
-    static const uint8_t WK[16] = PLAT_WHITE_KEYS;
+    static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
     uint32_t keys, btn = plat_buttons(), k, pressed, released, lit_keys = 0, lit_btn, pskip = 0;
     int32_t e;
     touch_poll();
@@ -2348,6 +2497,22 @@ static void input(void)
         uint32_t bit = 1u << k, down = (keys & bit) && !(ui.keys & bit), up = !(keys & bit) && (ui.keys & bit);
         if ((ui.pkeys | pskip) & bit)        /* PERFORM's: no note, no step */
             continue;
+        if (ui.fx_keys & bit) {              /* a black key FX took: its let-go is no note either */
+            if (up)
+                ui.fx_keys &= ~bit;
+            continue;
+        }
+        if (down && (btn >> B_FX & 1u) && !(ui.wake >> B_FX & 1u)) {   /* FX held: black keys 1 to 4 are the pages */
+            uint32_t j;                      /* (4.16; no note. CHAIN goes on from that page at the next bar) */
+            for (j = 0; j < 4u && BK[j] != k; j++)
+                ;
+            if (j < 4u) {
+                ui.fx_keys |= bit;
+                ui.fx_eat = 1;               /* (and letting FX go opens no page) */
+                seq_ask(j);
+                continue;
+            }
+        }
         if (on_t8l()) {                      /* the looper's track: the keys are silent, and the screen says why */
             if (down)
                 say_t8l("SELECT ANOTHER");
@@ -2369,14 +2534,15 @@ static void input(void)
                 ui.held_turned = 0;
                 ui.redraw = 1;
             } else if (up && ui.held_step == (int8_t)s) {
-                if (!ui.held_turned) {       /* a tap: the step on or off */
+                if (!ui.held_turned) {       /* a tap: the step on or off (on the page shown: STEP 17 is page 2's 1) */
                     char a[28], n[8];
-                    step_on[ui.sel][s] = (uint8_t)!step_on[ui.sel][s];
+                    const uint32_t i = (uint32_t)seq_view * NSTEP + s;
+                    step_on[ui.sel][i] = (uint8_t)!step_on[ui.sel][i];
                     a[0] = 0;
                     text_cat(a, "STEP ");
-                    int_text((int32_t)s + 1, n);
+                    int_text((int32_t)i + 1, n);
                     text_cat(a, n);
-                    app_say(a, step_on[ui.sel][s] ? "ON" : "OFF");
+                    app_say(a, step_on[ui.sel][i] ? "ON" : "OFF");
                 }
                 ui.held_step = -1;
                 ui.redraw = 1;
@@ -2441,6 +2607,10 @@ static void input(void)
         ui.redraw = 1;
     }
 
+    /* FX opens its pages when it is let go (4.16), unless a black key asked for a page of steps while it was held */
+    if (pressed >> B_FX & 1u)
+        ui.fx_eat = 0;
+    pressed = (pressed & ~(1u << B_FX)) | ((released >> B_FX & 1u) && !ui.fx_eat ? 1u << B_FX : 0u);
     for (k = 0; k < NB; k++) {
         static const char *const BTN_NAME[NB] = {"FX", "SEL", "ENV", "LFO", "EDIT", "GLO", "HOME", "SAVE", "ARP", "SEQ",
                                                  "PLAY", "REC", "OCT-", "OCT+"};
@@ -2585,8 +2755,8 @@ static void input(void)
               (ui.page == PAGE_STEP ? 1u << B_SEQ : 0u) |
               (ui.page == PAGE_FX || ui.page == PAGE_EQ ? 1u << B_FX : 0u) | (ui.page == PAGE_ENV ? 1u << B_ENV : 0u) | (ui.page == PAGE_LFO ? 1u << B_LFO : 0u) | (ui.page == PAGE_EDIT || ui.page == PAGE_EDIT2 ? 1u << B_EDIT : 0u) | (ui.page == PAGE_ARP ? 1u << B_ARP : 0u) | (ui.page == PAGE_GLO ? 1u << B_GLO : 0u) | (seq_play_req ? 1u << B_PLAY : 0u);
     if (ui.page == PAGE_STEP) {
-        for (k = 0; k < seq_len; k++)
-            if ((step_on[ui.sel][k] != 0) != (seq_play_req && seq_step_now == k))
+        for (k = 0; k < seq_len; k++)        /* (the page shown; the step playing lit only when it is that page) */
+            if ((step_on[ui.sel][seq_view * NSTEP + k] != 0) != (seq_play_req && seq_pg == seq_view && seq_step_now == k))
                 lit_keys |= 1u << WK[k];
     } else {
         lit_keys = keys;
@@ -2647,11 +2817,15 @@ static void page_words(uint32_t pg, char w[4][28], int32_t *pos)
                 p4[q] = (v - EQ_MIN) * 226 / (EQ_MAX - EQ_MIN);
             }
         }
-    } else if (pg == 3u) {
+    } else if (pg == 3u) {                   /* (4.16: KNOB 2 PLAY MODE, KNOB 3 LENGTH; they were Bluetooth's words) */
         text_cat(w[0], bt_on ? "ON" : "OFF");
+        text_cat(w[1], seq_mode == SEQ_PAGE ? "PAGE" : "CHAIN");
+        int_text(seq_pages, w[2]);
+        text_cat(w[2], seq_pages > 1u ? " BARS" : " BAR");
         text_cat(w[3], pf_latch ? "ON" : "OFF");
         p4[0] = bt_on ? 226 : 0;
-        p4[1] = p4[2] = 0;
+        p4[1] = seq_mode == SEQ_PAGE ? 226 : 0;
+        p4[2] = (seq_pages - 1) * 226 / ((int32_t)NPAGE - 1);
         p4[3] = pf_latch ? 226 : 0;
     } else {
         text_cat(w[0], ARP_R_NAME[t->arp_r < NARP_R ? t->arp_r : 0u]);
@@ -2863,17 +3037,18 @@ static void draw_steps(void)                 /* the step page: the selected trac
     cv_begin(240, 80, C_BLACK);
     for (i = 0; i < seq_len; i++) {
         int32_t x = 4 + (int32_t)(i % 8u) * 29, y = 2 + (int32_t)(i / 8u) * 38;
-        uint32_t on = step_on[ui.sel][i], now = seq_play_req && seq_step_now == i, held = ui.held_step == (int8_t)i;
+        uint32_t on = step_on[ui.sel][seq_view * NSTEP + i], now = seq_play_req && seq_pg == seq_view && seq_step_now == i,
+                 held = ui.held_step == (int8_t)i;
         uint16_t c = on ? C_ORANGE : C_LINE;
         if (SIG_BEATS[seq_sig] >> i & 1u)        /* a beat starts here: a mark under the step */
             cv_rect(x, y + 35, 27, 2, C_WHITE);
         cv_rect(x, y, 27, 34, held ? C_WHITE : now ? C_HI : c);
         if (!on || held || now)
             cv_rect(x + 2, y + 2, 23, 30, on ? C_ORANGE : C_BLACK);
-        int_text((int32_t)i + 1, n);
+        int_text((int32_t)(seq_view * NSTEP + i) + 1, n);   /* (page 2's first is 17) */
         cv_text(x + 4, y + 3, &FONT_XS, n, on ? C_BLACK : C_DIM);
         if (on && !drum) {
-            note_name(step_note[ui.sel][i], n);
+            note_name(step_note[ui.sel][seq_view * NSTEP + i], n);
             cv_text(x + 3, y + 17, &FONT_XS, n, C_BLACK);
         }
     }
@@ -2901,7 +3076,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
     cv_rect(0, 0, 240, 1, C_LINE);
     if (ui.page >= PAGE_EDIT) {              /* the EDIT, ARP, GLO and EQ pages: their four knobs and their values */
         static const char *const N4[5][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
-                                             {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "", "", "LATCH"},
+                                             {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "PLAY MODE", "LENGTH", "LATCH"},
                                              {"LOW", "MID", "MID FREQ", "HIGH"}};
         static const char *const BACK[5] = {"EDIT: PAGE 2", "ARP: BACK TO THE TRACKS", "EDIT: BACK TO THE TRACKS",
                                             "GLO: BACK   REC: DISCONNECT", "FX: BACK TO THE TRACKS"};
@@ -2976,10 +3151,13 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             int_text(t->pitch, v + (t->pitch > 0 ? 1 : 0));
         } else if (k == 1u) {
             filt_text(t->filt, v);
+        } else if (k == 3u && !(plat_buttons() >> B_OCTDN & 1u)) {     /* KNOB 4: the page of steps (4.16); */
+            int_text((int32_t)seq_view + 1, v);      /* OCT- held, LEVEL */
+            text_cat(v, "/4");
         } else {
             int_text(k == 2u ? t->decay : *lvl_of(ui.sel), v);
         }
-        cv_text(x, 3, &FONT_XS, NAME[k], C_GRAY);
+        cv_text(x, 3, &FONT_XS, k == 3u && !(plat_buttons() >> B_OCTDN & 1u) ? "PAGE" : NAME[k], C_GRAY);
         cv_text(x, 16, &FONT_B, v, hot ? C_WHITE : C_HI);
         if (k == 1u) {                       /* FILTER: where it stands, the off zone marked in the middle */
             int32_t c = x + 27, p = c + (int32_t)t->filt * 26 / FILT_MAX;
@@ -3151,7 +3329,7 @@ static void draw_lfo(void)
 static void draw_page4(uint32_t pg)
 {
     static const char *const NAME[5][4] = {{"START", "REVERSE", "LOOP", "LENGTH"}, {"RATE", "MODE", "OCTAVE", "GATE"},
-                                           {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "STATUS", "DISCONNECT", "PERFORM LATCH"},
+                                           {"SWING", "FIT", "TIME SIG", "TEMPO"}, {"BLUETOOTH", "PLAY MODE", "LENGTH", "PERFORM LATCH"},
                                            {"EQ LOW", "EQ MID", "MID FREQ", "EQ HIGH"}};
     const track_t *tr = &trk[ui.sel];
     const sound_t *snd = list_sound(tr->sound);
@@ -3189,14 +3367,16 @@ static void draw_page4(uint32_t pg)
         for (q = 0; q < 4u; q++)
             if (q != 2u && !tr->eq[q])
                 text_cat(w[q], ": OFF");
-    } else if (pg == 3u) {
-        text_cat(w[1], !bt_on ? "OFF" : plat_ble_connected() ? "CONNECTED" : plat_ble_linked() ? "CONNECTING" : "WAITING");
-        text_cat(w[2], "PRESS REC");
+    } else if (pg == 3u) {                   /* (Bluetooth's state after its ON: it had a line, STATUS, till 4.15) */
+        if (bt_on)
+            text_cat(w[0], plat_ble_connected() ? ": CONNECTED" : plat_ble_linked() ? ": CONNECTING" : ": WAITING");
+        text_cat(w[1], seq_mode == SEQ_PAGE ? ": THE PAGE SHOWN" : ": PAGE AFTER PAGE");
+        text_cat(w[2], " (ALL TRACKS)");
     }
     for (q = 0; q < 4u; q++) {
         int32_t y = q < 2u ? 22 + (int32_t)q * 29 : 2 + (int32_t)(q - 2u) * 29;
         uint32_t off = t8 || (pg == 1u && q != 0u && !tr->arp_r) ||     /* (the ARP off: the rest waits) */
-                       (pg == 2u && q == 3u && ck_follow) || (pg == 3u && q == 2u && !plat_ble_linked()) ||
+                       (pg == 2u && q == 3u && ck_follow) ||
                        (pg == 4u && q == 2u && !tr->eq[1]);  /* (MID off: its FREQ waits) */
         int hot = ui.hot == (int8_t)q && plat_ms() - ui.hot_t < 900u;
         if (!(q & 1u)) {
@@ -3219,7 +3399,7 @@ static void draw_page4(uint32_t pg)
         }
         cv_text(6, y, &FONT_B, NAME[pg][q], hot ? C_ORANGE : off ? C_GRAY : C_WHITE);
         cv_text(234 - text_w(&FONT_XS, w[q]), y + 1, &FONT_XS, w[q], off ? C_GRAY : C_HI);
-        if (pg != 3u || !q || q == 3u) {
+        {
             cv_rect(6, y + 20, 228, 1, C_DIM);   /* the knob's line */
             cv_rect(6, y + 19, pos[q], 3, off ? C_GRAY : C_ORANGE);
             cv_rect(6 + (pos[q] ? pos[q] - 1 : 0), y + 16, 3, 9, off ? C_GRAY : C_WHITE);
@@ -3924,6 +4104,16 @@ int app_expect(const char *what, int *got)
         *got = seq_sig;
     else if (!strcmp(what, "seq_len"))
         *got = seq_len;
+    else if (!strcmp(what, "seq_pages"))     /* (4.16: the pattern's pages; the one shown, playing; made; PLAY MODE) */
+        *got = seq_pages;
+    else if (!strcmp(what, "seq_view"))
+        *got = seq_view + 1u;
+    else if (!strcmp(what, "seq_pg"))
+        *got = seq_pg + 1u;
+    else if (!strcmp(what, "seq_made"))
+        *got = seq_made;
+    else if (!strcmp(what, "seq_mode"))
+        *got = seq_mode;
     else if (!strcmp(what, "bt_on"))         /* GLO's BLUETOOTH */
         *got = bt_on;
     else if (!strcmp(what, "ed_start"))      /* the selected track's EDIT page: START, REVERSE, LOOP (0 AUTO, 1 OFF, 2 ON), LENGTH */
@@ -4099,8 +4289,8 @@ int app_expect(const char *what, int *got)
             voice[i].state = V_OFF;
         trk[0].sound = (uint8_t)save;
     }
-    else if (!strncmp(what, "step", 4))      /* stepN: step N (1..16) of the selected track, 0 off or its note */
-        *got = step_on[ui.sel][(atoi(what + 4) - 1) & 15] ? step_note[ui.sel][(atoi(what + 4) - 1) & 15] : 0;
+    else if (!strncmp(what, "step", 4))      /* stepN: step N (1..64: 17 is page 2's 1) of the selected track, 0 off or its note */
+        *got = step_on[ui.sel][(atoi(what + 4) - 1) & 63] ? step_note[ui.sel][(atoi(what + 4) - 1) & 63] : 0;
     else
         return 0;
     return 1;

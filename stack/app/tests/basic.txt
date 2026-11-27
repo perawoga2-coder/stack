@@ -44,7 +44,9 @@ wavstop
 expect peak_db_min -30
 # PRESETS: only the sound changes; the screen says old > new (there is no UNDO SOUND since 4.02: REC is the looper's)
 turn K1 5
+press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 -10
+release OCT-
 wait 30
 expect pitch 5
 expect level 70
@@ -68,7 +70,9 @@ turn PRESET -2
 wait 60
 expect sound 33
 turn K1 -5
+press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 10
+release OCT-
 wait 30
 # the list stops at its ends
 turn PRESET 90

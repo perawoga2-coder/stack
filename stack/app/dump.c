@@ -16,7 +16,7 @@
 #define DUMP_PIECE 128u                      /* bytes a piece (147 once packed 7 to 8) */
 #define DUMP_VER 1u
 #define DUMP_HEAD 32u
-#define DUMP_TRK 96u
+#define DUMP_TRK 192u                     /* (96 till 4.16: pages 2 to 4 are the 96 after) */
 #define DUMP_LEN (DUMP_HEAD + NTRK * DUMP_TRK)
 static uint8_t dump_song[DUMP_LEN];          /* the record, as of the last "piece 0" */
 static struct {
@@ -42,7 +42,8 @@ static uint32_t dump_crc(uint32_t c, const uint8_t *p, uint32_t n)   /* the usua
     return c;
 }
 
-/* the song as it is now, into dump_song. Its layout is docs/PROTOCOL.md's: a head of 32 bytes, then 96 a track */
+/* the song as it is now, into dump_song. Its layout is docs/PROTOCOL.md's: a head of 32 bytes, then 192 a track (its
+ * first 96 as before 4.16; then pages 2, 3, 4, 32 bytes each: the steps 16, their notes 16) */
 static void dump_make(void)
 {
     static const char *const KIND[4] = {"", "", "MY", "LOOP"};
@@ -55,6 +56,8 @@ static void dump_make(void)
     h[6] = (uint8_t)DUMP_TRK;
     h[7] = (uint8_t)((lp.has ? 1u : 0u) | (seq_play_req ? 2u : 0u) | (ck_follow ? 4u : 0u) |
                      (lp.own && lp.trk != NTRK - 1u ? 8u : 0u));     /* (bit 3: the loop is on track 7, since 4.04) */
+    h[14] = seq_pages;                       /* (4.16: the pattern's pages, LENGTH; PLAY MODE. 0 before: one page) */
+    h[15] = seq_mode;
     h[8] = (uint8_t)DUMP_LEN;
     h[9] = (uint8_t)(DUMP_LEN >> 8);
     h[16] = (uint8_t)clamp((int32_t)(44100.0f * 15.0f / (ck_tick_frames() * 6.0f) + 0.5f), 20, 255);
@@ -100,9 +103,11 @@ static void dump_make(void)
 #undef F
         if (kind == 3u)
             p[31] = lp.lvl;                  /* (LEVEL: the loop's own) */
-        for (i = 0; i < NSTEP; i++) {
-            p[56u + i] = step_on[t][i] ? 1u : 0u;
-            p[72u + i] = step_note[t][i];
+        for (i = 0; i < NSTEPS; i++) {       /* page 1 at 56 and 72; page k (2 to 4) at 96 + 32 (k - 2) and 16 on */
+            const uint32_t pg = i / NSTEP, s = i % NSTEP;
+            uint8_t *g = pg ? p + 96u + (pg - 1u) * 32u : p + 56;
+            g[s] = step_on[t][i] ? 1u : 0u;
+            g[s + 16u] = step_note[t][i];
         }
         i = eq_word(t);                      /* the EQ (4.06): the three bytes after the settings, 0 till then */
         p[53] = (uint8_t)i;
