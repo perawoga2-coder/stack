@@ -110,16 +110,15 @@ wait 2000
 expect sounded7 1
 expect sounded8 0
 shot looper_moved_t8.png
-# a take cancelled (REC held past half a second) and an undo do not move it
-press REC
-wait 1500
-release REC
-wait 60
-expect loop_layers 2
-expect loop_trk 8
-press REC
-wait 3500
-release REC
+# an undo does not move it (4.15: GLO held 3 s, then OCT-)
+press GLO
+wait 3100
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_layers 1
 expect loop_has 1
@@ -130,9 +129,16 @@ wait 2000
 expect sounded7 1
 expect sounded8 0
 # a clear: both tracks are their own again; the next first layer is track 8's
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 expect loop_own 0
@@ -149,9 +155,14 @@ tap REC
 wait 100
 expect loop_state 2
 expect loop_trk 8
-press REC
-wait 3300
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 100
 expect loop_state 0
 expect loop_own 0
@@ -276,7 +287,7 @@ expect track 5
 # is let go: 2); it ends by itself after once round the loop
 press REC
 wait 30
-expect loop_state 1
+expect loop_state 2
 shot looper_layer_two.png
 release REC
 wait 30
@@ -309,78 +320,87 @@ shot looper_three_layers.png
 wait 4200
 wavstop
 expect lim_clips 0
-# --- REC held. Let go between half a second and 3 s: nothing. What the press began is dropped at half a second,
-# and nothing of it was written: the undo is still there
+# --- 4.15: REC only records: a hold is a press, nothing more. Layers are taken off with GLO held 3 s: OCT- takes
+# the newest off, OCT- again the whole loop; the pattern plays on
 wav looper_undo.wav
 press REC
-wait 300
-expect loop_state 1
-wait 300
-expect loop_state 0
-wait 900
-shot looper_hold_early.png
-# (4.09: the hold's line before 3 s follows the undo too: here there is one)
-expect scr_HOLD_3_S:_UNDO_LAYER__5_S:_CLEAR_LOOP 1
+wait 1500
+expect loop_state 2
 release REC
 wait 60
-# (4.10: let go before 3 s, the message says what a hold does here: an undo, a clear)
-expect msg_REC:_HOLD_3_S_UNDO,_5_S_CLEAR 1
-expect loop_layers 3
+expect loop_state 2
+wait 1200
 expect loop_state 0
+expect loop_layers 4
 expect loop_undo 1
-# let go between 3 and 5 s: the last layer goes
-press REC
-wait 3500
-shot looper_hold_undo.png
-release REC
+press GLO
+wait 2800
+expect msg_OCT-:_UNDO_TWICE:_CLEAR 0
+wait 300
+expect msg_OCT-:_UNDO_TWICE:_CLEAR 1
+shot looper_glo_held.png
+tap OCT-
 wait 200
-expect loop_layers 2
+expect msg_LAYER_4_UNDONE 1
+expect loop_layers 3
 expect loop_undo 0
 expect loop_has 1
-expect loop_trk 7
-# again: only one layer can be undone (4.09: the hold's line says so before 3 s too, and the 3 s line)
-press REC
-wait 1500
-expect scr_HOLD_3_S:_NO_UNDO__5_S:_CLEAR_LOOP 1
-expect scr_UNDO_LAYER 0
-wait 2000
-expect scr_LET_GO:_NO_UNDO__HOLD_ON:_CLEAR 1
-release REC
+expect playing 1
+release GLO
+wait 30
+expect octave 0
+tap GLO
+wait 30
+expect page 0
+# again: only one layer can be undone
+press GLO
+wait 3100
+tap OCT-
 wait 200
-expect loop_layers 2
-shot looper_only_one_undo.png
+expect msg_ONLY_1_LAYER_CAN_BE_UNDONE 1
+expect loop_layers 3
+release GLO
+wait 30
+tap GLO
+wait 30
+expect octave 0
 wait 1500
 wavstop
-# the press that ends a take, held on and let go between 3 and 5 s: the layer just made goes again (it moved to
-# track 8 as it came in; the undo leaves it there)
-tap REC
-wait 500
-expect loop_state 2
-press REC
-wait 200
-expect loop_state 0
+# OCT- without GLO held 3 s moves the octave, as ever (GLO held less: OCT- is OCT-)
+press GLO
+wait 1000
+tap OCT-
+wait 60
+release GLO
+wait 30
+tap GLO
+wait 30
+expect octave -1
 expect loop_layers 3
-expect loop_trk 8
-wait 3300
-release REC
-wait 200
-expect loop_state 0
-expect loop_layers 2
-expect loop_has 1
-expect loop_trk 8
-# --- held 5 s: the whole loop goes, there and then; letting go does nothing more; tracks 7 and 8 are their own
+tap OCT+
+wait 60
+expect octave 0
+# --- GLO held 3 s, OCT- twice: the whole loop goes, the pattern playing on; tracks 7 and 8 are their own
 wav looper_clear.wav
-press REC
-wait 4900
+press GLO
+wait 3100
+tap OCT-
+wait 30
 expect loop_has 1
-wait 300
+tap OCT-
+wait 200
+expect msg_LOOP_CLEARED 1
 expect loop_has 0
+expect playing 1
 shot looper_cleared.png
-release REC
+release GLO
+wait 30
+tap GLO
 wait 200
 expect loop_has 0
 expect loop_layers 0
 expect loop_own 0
+expect octave 0
 expect trk8 5
 expect trk7 5
 wavstop
@@ -393,39 +413,24 @@ key 7 up
 wait 500
 turn ALGO -3
 wait 60
-# a first layer whose REC is held on a second: it records all the same (a hold means nothing there before 3 s)
+# a first layer whose REC is held on: it records all the same
 press REC
-wait 300
+wait 1000
 expect loop_state 2
 expect loop_own 1
-wait 700
-expect loop_state 2
-# (4.10: from half a second the hold's line shows, as in the other cases; the take's bar stays until 3 s)
-expect scr_HOLD_3_S:_CANCEL_TAKE 1
-# (4.10: no loop yet: 5 s cancels the take too, there is no loop to clear; the line does not promise one)
-expect scr_5_S:_CLEAR 0
 shot looper_hold_take.png
 release REC
 wait 100
-# (4.10: let go before 3 s in a first layer's take, the message says what a hold does there: it cancels the take,
-# and with no loop there is no 5 s clear to promise)
-expect msg_REC:_HOLD_3_S_CANCEL 1
-expect msg_5_S_CLEAR 0
-expect msg_UNDO 0
 expect loop_state 2
-# held from its start for 3 s and let go: dropped; track 8 stays its own
-tap PLAY
-wait 200
-expect loop_state 0
-tap PLAY
-wait 300
-press REC
-wait 3300
-expect loop_state 2
-# (4.09: the 3 s line says what letting go does, as looper_undo has it: the take goes; HOLD ON as the others say)
-expect scr_LET_GO:_CANCEL_TAKE 1
-expect scr_HOLD_ON 0
-release REC
+# a first layer's take, GLO held 3 s and OCT-: the take goes; track 8 stays its own
+press GLO
+wait 3100
+tap OCT-
+wait 100
+expect msg_TAKE_CANCELLED 1
+release GLO
+wait 30
+tap GLO
 wait 100
 expect loop_state 0
 expect loop_own 0
@@ -445,9 +450,16 @@ expect loop_total 88200
 peakreset
 wait 2000
 expect peak_db_min -40
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 # --- rounding up to two bars: REC again after 3.2 s; it records on to 4 s. The memory holds 8 s at 22 kHz
@@ -473,9 +485,16 @@ expect loop_state 2
 wait 300
 expect loop_state 0
 expect loop_layers 2
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 # --- a first layer left running: at 120 four bars (8 s) are all the memory holds: it ends by itself there, and says so
@@ -511,9 +530,16 @@ expect loop_state 0
 expect loop_layers 2
 wait 8000
 expect lim_clips 0
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 # --- SELECT is the tempo, a beat a minute a click, 40 to 240 (EDIT 2's KNOB 4 shows the same)
@@ -576,9 +602,16 @@ turn SELECT -40
 wait 3000
 expect loop_drift 1
 shot looper_out_of_time.png
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 # --- at 40 a bar is 6 s: one bar is all that fits (REC again after 2 s: it records on to 6 s)
@@ -595,9 +628,16 @@ expect loop_state 0
 expect loop_bars 1
 expect loop_total 264600
 expect loop_layers 1
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 turn SELECT 80
@@ -636,9 +676,16 @@ wait 300
 peakreset
 wait 2500
 expect peak_db_min -40
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 # --- on the step page a take records the steps of the track on it (the kick), not the other tracks' steps
@@ -684,9 +731,16 @@ expect peak_db_min -40
 wavstop
 # --- 4.05: a take records the playing with its track's effects, as it is heard. A short note on track 5 (the
 # piano), dry: the loop is silent after it. With REVERB on HALL, all the way: the hall's tail is in the loop too
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 turn ALGO 4
@@ -709,9 +763,16 @@ expect loop_db0_400 >-30
 expect loop_db1000_1900 <-70
 wait 2000
 wavstop
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 tap FX
@@ -818,9 +879,16 @@ tap REC
 wait 700
 expect loop_layers 1
 expect loop_db0_600 >-26
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 tap FX
@@ -842,9 +910,19 @@ tap REC
 wait 700
 expect loop_layers 1
 expect loop_db0_600 <-30
-press REC
-wait 5200
-release REC
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap FX
+wait 40
+tap FX
+wait 40
+expect page 9
 wait 200
 turn K1 15 20
 tap FX
@@ -941,23 +1019,35 @@ wait 60
 expect msg_THE_LOOP'S_TRACK:_SELECT_ANOTHER 1
 key 7 up
 wait 20
-# --- 4.10: a take with no loop under it, REC held to 5 s: only the take goes, and that is what is said
-press REC
-wait 5200
-release REC
+# --- a take with no loop under it, GLO held 3 s and OCT- twice: only the take goes, and that is what is said
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
 wait 200
 expect loop_has 0
 expect loop_state 0
-press REC
+tap REC
 wait 1000
 expect loop_state 2
 expect loop_has 0
-expect scr_HOLD_3_S:_CANCEL_TAKE 1
-expect scr_5_S:_CLEAR 0
-wait 4100
+press GLO
+wait 3100
+tap OCT-
+wait 100
 expect msg_TAKE_CANCELLED 1
+tap OCT-
+wait 200
+expect msg_NOTHING_TO_CLEAR 1
 expect msg_LOOP_CLEARED 0
-release REC
+release GLO
+wait 30
+tap GLO
 wait 200
 expect loop_state 0
 expect loop_has 0

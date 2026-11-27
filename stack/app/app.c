@@ -167,11 +167,9 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the group and the p
 #define ENV_AUTO (-1)                    /* RELEASE as before the ENV page: a held sound lets go at DECAY's pace, a hit
                                           * plays through */
 #define ENV_V_START 75                   /* VELOCITY as before: a quarter of the loudness fixed, the rest the finger's */
-#define REC_SHORT_MS 500u                /* REC let go before this: a short press (a layer starts, or ends) */
-#define REC_UNDO_MS 3000u                /* REC let go after this: the last layer goes */
-#define REC_CLEAR_MS 5000u               /* REC held this long: the whole loop goes */
+#define GLO_UNDO_MS 3000u                /* GLO held this long: OCT- takes the newest layer off, OCT- again the whole loop (4.15) */
 /* the header says what REC is doing: it is held past a short press, or a take waits or runs */
-#define REC_HELD (ui.rec_t && !ui.rec_fired && (int32_t)(plat_ms() - ui.rec_t) >= (int32_t)REC_SHORT_MS)
+#define REC_HELD 0                       /* (4.15: REC only records; a hold does nothing more) */
 #define LP_TAKE (lp.state != LP_IDLE || lp.req == LQ_ARM)   /* a take waits or runs */
 #define LP_TAKE_LIVE (LP_TAKE && lp.req != LQ_CANCEL)          /* and is not being let go (REC's hold line, its undo) */
 #define REC_UP (REC_HELD || LP_TAKE)
@@ -1805,9 +1803,10 @@ static struct {
     int8_t hot;                          /* the knob turned last (0..3), lit for a moment */
     uint32_t hot_t;
     uint8_t title;                       /* the title is up (the first TITLE_MS after a start) */
-    uint8_t rec_take;                    /* this press of REC began a take (a hold drops it; let go in time, it stays) */
-    uint8_t rec_fired;                   /* REC held long enough: it cleared (letting go does nothing more) */
-    uint32_t rec_t;                      /* REC went down (0: not held) */
+    uint8_t rec_take;                    /* this press of REC began a take */
+    uint8_t glo_n;                       /* GLO held 3 s: 1, and one more for each OCT- since (4.15) */
+    uint8_t oct_eat;                     /* that OCT- was GLO's: its let-go moves no octave */
+    uint32_t glo_t;                      /* GLO went down (0: not held) */
     uint32_t loop_seen;                  /* takes finished that the screen has said */
     uint32_t loop_drawn;                 /* the looper's state as the screen shows it */
     uint8_t redraw;
@@ -1960,7 +1959,7 @@ static void looper_press(void)
     }
 }
 
-static void looper_undo(void)                /* REC held 3 to 5 s: the take under way is dropped, or the newest layer goes */
+static void looper_undo(void)                /* GLO held 3 s, OCT-: the take under way is dropped, or the newest layer goes */
 {
     char a[20];
     if (LP_TAKE_LIVE) {                      /* (one whose cancel is asked for already, at half a second, is not: the
@@ -1980,7 +1979,7 @@ static void looper_undo(void)                /* REC held 3 to 5 s: the take unde
     }
 }
 
-static void looper_clear(void)               /* REC held 5 s: the whole loop goes; tracks 7 and 8 are their own again */
+static void looper_clear(void)               /* GLO held 3 s, OCT- twice: the whole loop goes; tracks 7 and 8 are their own again */
 {
     if (lp.has || LP_TAKE_LIVE) {
         lp.req = LQ_CLEAR;
@@ -2402,55 +2401,44 @@ static void input(void)
         }
     }
 
+    /* 4.15: the loop is taken off with GLO held 3 s: OCT- then takes the newest layer off (or drops the take under
+     * way), OCT- again the whole loop. Playing on: the looper crosses over in 10 ms, fades out in 15 */
+    {
+        const uint32_t now = plat_ms();
+        if (pressed >> B_GLO & 1u) {
+            ui.glo_t = now | 1u;
+            ui.glo_n = 0;
+        }
+        if (released >> B_GLO & 1u)
+            ui.glo_t = 0;
+        if (ui.glo_t && ui.glo_n == 0 && (int32_t)(now - ui.glo_t) >= (int32_t)GLO_UNDO_MS) {
+            ui.glo_n = 1;                    /* (1: ready; each OCT- from here counts) */
+            app_say("OCT-: UNDO", "TWICE: CLEAR");
+        }
+        if ((pressed >> B_OCTDN & 1u) && ui.glo_n) {
+            ui.oct_eat = 1;                  /* (its let-go moves no octave) */
+            if (++ui.glo_n == 2u)
+                looper_undo();
+            else if (ui.glo_n == 3u)
+                looper_clear();
+        }
+    }
     /* OCT- and OCT+ move the keys' octave, when the button is let go */
-    if (released >> B_OCTDN & 1u)
-        octave_step(-1);
+    if (released >> B_OCTDN & 1u) {
+        if (ui.oct_eat)
+            ui.oct_eat = 0;
+        else
+            octave_step(-1);
+    }
     if (released >> B_OCTUP & 1u)
         octave_step(1);
     /* REC is the looper's (but on the GLO page, where it is DISCONNECT). It acts when it goes down: a layer is recorded
-     * from there, or the one recording ends. Held: let go between REC_UNDO_MS and REC_CLEAR_MS, the last layer goes;
-     * at REC_CLEAR_MS the whole loop goes, there and then. Let go between a short press and REC_UNDO_MS: nothing */
-    if (ui.page != PAGE_GLO) {
-        const uint32_t now = plat_ms();
-        if (pressed >> B_REC & 1u) {
-            ui.rec_t = now ? now : 1u;
-            ui.rec_fired = 0;
-            HOST_DROP(host_hold);
-            ui.rec_take = 0;
-            looper_press();
-        }
-        if (ui.rec_take && ui.rec_t && lp.state == LP_PRE && (int32_t)(now - ui.rec_t) >= (int32_t)REC_SHORT_MS) {
-            ui.rec_take = 0;                 /* a hold, not a take: the layer on top that the press began is dropped
-                                              * (nothing of it was written: the undo is whole). A first layer records
-                                              * on: there is nothing a hold could be for until 3 s */
-            lp.req = LQ_CANCEL;
-        }
-        if (ui.rec_t && (btn >> B_REC & 1u) && !ui.rec_fired && (int32_t)(now - ui.rec_t) >= (int32_t)REC_CLEAR_MS) {
-            ui.rec_fired = 1;
-            looper_clear();
-        }
-        if (released >> B_REC & 1u) {
-            if (ui.rec_t && !ui.rec_fired) {
-                const int32_t held = (int32_t)(now - ui.rec_t);
-                if (held < (int32_t)REC_SHORT_MS)
-                    lp.go = ui.rec_take;     /* (a layer on top waited for this: it is taken) */
-                else if (held >= (int32_t)REC_UNDO_MS)
-                    looper_undo();
-                else if (LP_TAKE_LIVE)       /* (as the hold's line: 3 s lets the take go; 5 s clears a loop there is) */
-                    app_say(lp.has ? "REC: HOLD 3 S CANCEL," : "REC: HOLD 3 S", lp.has ? "5 S CLEAR" : "CANCEL");
-                else if (!lp.has)
-                    app_say("NO LOOP:", "NOTHING TO UNDO");
-                else
-                    app_say("REC: HOLD 3 S UNDO,", "5 S CLEAR");
-            }
-            ui.rec_t = 0;
-            ui.rec_take = 0;
-            ui.redraw = 1;
-        }
-        if (ui.rec_t && (int32_t)(now - ui.rec_t) >= (int32_t)REC_SHORT_MS)
-            ui.redraw = 1;                   /* (the hold's bar grows) */
-    } else {
-        ui.rec_t = 0;
+     * from there, or the one recording ends. A hold does nothing more (4.15: taking layers off is GLO's) */
+    if (ui.page != PAGE_GLO && (pressed >> B_REC & 1u)) {
+        ui.rec_take = 0;
+        looper_press();
+        lp.go = ui.rec_take;                 /* (a layer on top is taken at once: no hold to wait for) */
+        ui.redraw = 1;
     }
 
     for (k = 0; k < NB; k++) {
@@ -2716,31 +2704,13 @@ static void draw_header(void)
         cv_text(5, 0, &FONT_B, "PERFORM", C_BLACK);
         cv_text(82, 2, &FONT_XS, pf_latch ? "LATCH: A KEY ON, AGAIN OFF" : "HOLD A WHITE KEY", C_HI);
     } else if (REC_UP) {
-        /* REC is held, or a take waits or runs: said on a block, then where it stands */
-        const int32_t held = ui.rec_t && !ui.rec_fired ? (int32_t)(now - ui.rec_t) : 0;
-        /* (the press that began a first layer, still down: it records on; the hold's line shows, the take's bar stays
-         * until 3 s) */
-        const int keep = ui.rec_take && lp.state == LP_REC && lp.first && held < (int32_t)REC_UNDO_MS;
+        /* a take waits or runs: where it stands */
         const char *w;
         char c[8];
         t[0] = 0;
         cv_rect(0, 0, 36, 16, C_ORANGE);
         cv_text(5, 0, &FONT_B, "REC", C_BLACK);
-        if (held >= (int32_t)REC_SHORT_MS) {
-            /* what letting go at 3 s does (as looper_undo has it) and what 5 s does: no loop, nothing to either; no
-             * undo (PERFORM took its block, one layer), letting go says which */
-            const int u = held >= (int32_t)REC_UNDO_MS, take = LP_TAKE_LIVE;   /* (as looper_undo) */
-            w = t;
-            if (!lp.has && !take) {
-                w = "NO LOOP: NOTHING TO UNDO OR CLEAR";
-            } else {
-                text_cat(t, u ? "LET GO: " : "HOLD 3 S: ");
-                text_cat(t, take ? "CANCEL TAKE" : lp.undo ? "UNDO LAYER" : "NO UNDO");
-                if (lp.has)                  /* (a first layer's take: at 5 s too it is only the take that goes) */
-                    text_cat(t, u ? "  HOLD ON: CLEAR" : "  5 S: CLEAR LOOP");
-            }
-            HOST_KEEP(host_hold, w);
-        } else if (lp.first && lp.stop) {    /* a first layer, REC pressed again: it records on to its last bar's end */
+        if (lp.first && lp.stop) {           /* a first layer, REC pressed again: it records on to its last bar's end */
             text_cat(t, "RECORDING ON TO ");
             bars_cat(t);
             w = t;
@@ -2761,19 +2731,15 @@ static void draw_header(void)
             }
             w = t;
         }
-        cv_text(42, 2, &FONT_XS, w, held < (int32_t)REC_SHORT_MS ? C_WHITE : C_HI);
-        if (held >= (int32_t)REC_SHORT_MS && !keep) {    /* the hold's bar: a mark at 3 s, full at 5 s */
-            cv_rect(50, 20, 184, 5, C_LINE);
-            cv_rect(50, 20, (int32_t)((uint32_t)held >= REC_CLEAR_MS ? 184u : (uint32_t)held * 184u / REC_CLEAR_MS), 5,
-                    held >= (int32_t)REC_UNDO_MS ? C_ORANGE : C_WHITE);
-            cv_rect(50 + (int32_t)(REC_UNDO_MS * 184u / REC_CLEAR_MS), 18, 1, 9, C_WHITE);
-        } else {
-            /* the take's bar, running from the press: what is left, of the memory (a first layer; of its way to its
-             * last bar's end once REC was pressed again) or of the pass round the loop (a layer on top) */
+        cv_text(42, 2, &FONT_XS, w, C_WHITE);
+        {   /* the take's bar, running from the press: what is left, of the memory (a first layer; of its way to its
+             * last bar's end once REC was pressed again) or of the pass round the loop (a layer on top). 4.15: thick
+             * and red, in a white frame, so it reads at a glance */
             const uint32_t of = lp.first ? (lp.stop ? lp.want : lp.maxf) : lp.total, tk = lp.tk;
-            cv_rect(50, 20, 184, 5, C_LINE);
+            cv_rect(50, 17, 186, 10, C_WHITE);
+            cv_rect(51, 18, 184, 8, C_BLACK);
             if (of && tk < of)
-                cv_rect(50, 20, (int32_t)((uint64_t)(of - tk) * 184u / of), 5, C_ORANGE);
+                cv_rect(51, 18, (int32_t)((of - tk) * 23u / (of / 8u + 1u)), 8, RGB(255, 40, 40));
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
@@ -3022,7 +2988,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             cv_rect(p - 1, 32, 3, 7, t->filt >= -FILT_DEAD && t->filt <= FILT_DEAD ? C_GRAY : C_ORANGE);
         }
     }
-    if (!hint_line(lp.own ? "REC: LAYER  HELD 3 S: UNDO  5 S: CLEAR" : "ALGO: TRACK  PRESETS: SOUND")) {
+    if (!hint_line(lp.own ? "REC: LAYER  GLO 3 S+OCT-: UNDO  x2: CLEAR" : "ALGO: TRACK  PRESETS: SOUND")) {
         char c[20];                          /* where the track's sound is in the list: its category and place there;
                                               * the loop's track: LOOP and its length (its own sound sleeps) */
         if (on_t8l()) {
@@ -3346,7 +3312,7 @@ static void draw_rec(void)
 {
     const uint32_t of = lp.first ? (lp.stop ? lp.want : lp.maxf) : lp.total, tk = lp.tk, bf = pat_frames();
     const uint32_t gw = lp.first ? lp.maxf : lp.total;          /* (the graph's whole width: it keeps its scale) */
-    const uint32_t x = gw ? (tk < gw ? (uint32_t)((uint64_t)tk * RW / gw) : RW - 1u) : 0u;
+    const uint32_t x = gw ? (tk < gw ? (tk * RW / gw) : RW - 1u) : 0u;
     char t[12], c[8];
     uint32_t i, h;
     float pk = lp.pk;
@@ -3385,9 +3351,9 @@ static void draw_rec(void)
     cv_rect(10, 4, RW, 64, RGB(30, 12, 12));
     cv_rect(10, 4, (int32_t)x, 64, RGB(70, 20, 20));             /* the part gone */
     for (i = 1; bf && gw && i * bf < gw; i++)    /* a line at each bar */
-        cv_rect(10 + (int32_t)((uint64_t)i * bf * RW / gw), 4, 1, 64, C_GRAY);
+        cv_rect(10 + (int32_t)(i * bf * RW / gw), 4, 1, 64, C_GRAY);
     if (lp.first && lp.stop && gw)               /* REC pressed again: where it ends (its last bar's end) */
-        cv_rect(9 + (int32_t)((uint64_t)lp.want * RW / gw), 0, 3, 72, C_ORANGE);
+        cv_rect(9 + (int32_t)(lp.want * RW / gw), 0, 3, 72, C_ORANGE);
     for (i = 0; i < RW; i++)                     /* what was recorded, about the middle line */
         if (rec_w[i])
             cv_rect(10 + (int32_t)i, 36 - rec_w[i], 1, rec_w[i] * 2u, RGB(255, 80, 60));
@@ -3502,8 +3468,6 @@ void app_ui_init(void)
 {
     my_t0 = plat_ms();
     ui.title = 1;
-    ui.rec_t = 0;
-    ui.rec_fired = 0;
     touch_on(1);                             /* velocity: the keys' readings on */
     plat_usb_audio_full(1);                  /* USB audio at full level, whatever MASTER says */
     lcd_fill(0, 0, 240, 240, C_BLACK);
@@ -3806,7 +3770,7 @@ int app_expect(const char *what, int *got)
             text_cat(t, " ");
             text_cat(t, ui.msg[1]);
         } else if (!msg) {
-            text_cat(t, ui.rec_t && !ui.rec_fired ? host_hold : "");    /* (as drawn: cleared where each is drawn) */
+            text_cat(t, host_hold);              /* (as drawn: cleared where each is drawn) */
             text_cat(t, " | ");
             text_cat(t, host_corner);
             if (ui.msg_low && plat_ms() < ui.msg_until) {   /* (a message on the bottom line: say_t8l over a take) */

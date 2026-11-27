@@ -189,7 +189,7 @@ shot city_looper.png
 press REC
 wait 30
 expect city 0
-expect loop_state 1
+expect loop_state 2
 release REC
 wait 30
 expect loop_state 2

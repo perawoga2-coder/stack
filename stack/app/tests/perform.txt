@@ -692,21 +692,20 @@ key w1 up
 wait 40
 release SEL
 wait 400
-# REC held 3 s: nothing to undo now, and the screen says why (4.07: not ONLY 1 LAYER); the loop plays on
-# 4.08: the hold's line says so too at 3 s (LET GO: NO UNDO, not UNDO LAYER)
-press REC
-wait 3400
-expect scr_LET_GO:_NO_UNDO 1
-expect scr_UNDO_LAYER 0
-shot perform_hold_no_undo.png
-wait 100
-release REC
-wait 100
+# GLO held 3 s, OCT-: nothing to undo now, and the screen says why (4.07: not ONLY 1 LAYER); the loop plays on
+press GLO
+wait 3100
+tap OCT-
+wait 200
 expect loop_layers 3
 expect loop_has 1
 expect msg_NO_UNDO:_PERFORM_USED_IT 1
 expect msg_ONLY_1_LAYER 0
 shot perform_no_undo.png
+release GLO
+wait 30
+tap GLO
+wait 30
 # a REPEAT held when a take is armed gives the block back at once: the take is whole
 press SEL
 wait 40
@@ -724,27 +723,37 @@ expect pf_buf 0
 key w1 up
 release SEL
 wait 200
-# that new layer's undo is the looper's again: it goes; one more hold says ONLY 1 LAYER, not PERFORM
-press REC
-wait 3400
-expect scr_LET_GO:_UNDO_LAYER 1
-wait 100
-release REC
-wait 400
+# that new layer's undo is the looper's again: it goes; one more says ONLY 1 LAYER, not PERFORM
+press GLO
+wait 3100
+tap OCT-
+wait 200
 expect loop_layers 3
 expect msg_LAYER_4_UNDONE 1
+release GLO
+wait 30
+tap GLO
 wait 1600
-press REC
-wait 3400
-expect scr_LET_GO:_NO_UNDO 1
-wait 100
-release REC
-wait 100
+press GLO
+wait 3100
+tap OCT-
+wait 200
 expect msg_ONLY_1_LAYER_CAN_BE_UNDONE 1
 expect msg_PERFORM 0
-press REC
-wait 5200
-release REC
+release GLO
+wait 30
+tap GLO
+wait 30
+press GLO
+wait 3100
+tap OCT-
+wait 30
+tap OCT-
+wait 30
+release GLO
+wait 30
+tap GLO
+wait 30
 wait 200
 expect loop_has 0
 tap PLAY
