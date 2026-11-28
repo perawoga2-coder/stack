@@ -6,7 +6,7 @@ tap SEQ
 wait 40
 expect track 1
 expect sound 1
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20
@@ -19,7 +19,7 @@ turn ALGO 1
 wait 20
 expect track 2
 expect sound 3
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20
@@ -30,7 +30,7 @@ turn ALGO 1
 wait 20
 expect track 3
 expect sound 5
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20
@@ -55,7 +55,7 @@ turn ALGO 1
 wait 20
 expect track 4
 expect sound 23
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20
@@ -82,7 +82,7 @@ turn PRESET 5
 wait 30
 expect track 5
 expect sound 38
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20
@@ -107,7 +107,7 @@ turn ALGO 1
 wait 20
 expect track 6
 expect sound 55
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20
@@ -134,7 +134,7 @@ turn PRESET 48
 wait 30
 expect track 7
 expect sound 48
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20
@@ -161,7 +161,7 @@ turn PRESET 59
 wait 30
 expect track 8
 expect sound 59
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
+press OCT-  # (4.16: on the steps' page OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 20
 release OCT-
 wait 20

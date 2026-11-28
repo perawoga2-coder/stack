@@ -129,15 +129,9 @@ wait 2000
 expect sounded7 1
 expect sounded8 0
 # a clear: both tracks are their own again; the next first layer is track 8's
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -260,9 +254,7 @@ tap SEQ
 wait 60
 expect page 0
 expect level 80
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 -10
-release OCT-
 wait 60
 expect level 70
 key 7 down 100
@@ -279,9 +271,7 @@ expect scr_LOOP 0
 expect level 80
 turn ALGO -1
 wait 60
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 10
-release OCT-
 wait 60
 expect level 80
 turn ALGO -2
@@ -339,9 +329,9 @@ expect loop_layers 4
 expect loop_undo 1
 press GLO
 wait 2800
-expect msg_OCT-:_UNDO_TWICE:_CLEAR 0
+expect msg_OCT-:_UNDO_THE_LAST_LAYER 0
 wait 300
-expect msg_OCT-:_UNDO_TWICE:_CLEAR 1
+expect msg_OCT-:_UNDO_THE_LAST_LAYER 1
 shot looper_glo_held.png
 tap OCT-
 wait 200
@@ -384,22 +374,19 @@ expect loop_layers 3
 tap OCT+
 wait 60
 expect octave 0
-# --- GLO held 3 s, OCT- twice: the whole loop goes, the pattern playing on; tracks 7 and 8 are their own
+# --- REC held 5 s (4.17): the whole loop goes, the pattern playing on; tracks 7 and 8 are their own
 wav looper_clear.wav
-press GLO
-wait 3100
-tap OCT-
-wait 30
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 2000
+expect scr_HOLD_5_S:_CLEAR_THE_LOOP 1
 expect loop_has 1
-tap OCT-
-wait 200
+shot looper_rec_held.png
+wait 3100
 expect msg_LOOP_CLEARED 1
 expect loop_has 0
 expect playing 1
 shot looper_cleared.png
-release GLO
-wait 30
-tap GLO
+release REC
 wait 200
 expect loop_has 0
 expect loop_layers 0
@@ -454,15 +441,9 @@ expect loop_total 88200
 peakreset
 wait 2000
 expect peak_db_min -40
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -489,15 +470,9 @@ expect loop_state 2
 wait 300
 expect loop_state 0
 expect loop_layers 2
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -534,15 +509,9 @@ expect loop_state 0
 expect loop_layers 2
 wait 8000
 expect lim_clips 0
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -606,15 +575,9 @@ turn SELECT -40
 wait 3000
 expect loop_drift 1
 shot looper_out_of_time.png
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -632,15 +595,9 @@ expect loop_state 0
 expect loop_bars 1
 expect loop_total 264600
 expect loop_layers 1
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -680,15 +637,9 @@ wait 300
 peakreset
 wait 2500
 expect peak_db_min -40
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -735,15 +686,9 @@ expect peak_db_min -40
 wavstop
 # --- 4.05: a take records the playing with its track's effects, as it is heard. A short note on track 5 (the
 # piano), dry: the loop is silent after it. With REVERB on HALL, all the way: the hall's tail is in the loop too
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -767,15 +712,9 @@ expect loop_db0_400 >-30
 expect loop_db1000_1900 <-70
 wait 2000
 wavstop
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -883,15 +822,9 @@ tap REC
 wait 700
 expect loop_layers 1
 expect loop_db0_600 >-26
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0
@@ -914,17 +847,9 @@ tap REC
 wait 700
 expect loop_layers 1
 expect loop_db0_600 <-30
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap FX
-wait 40
-tap FX
+press REC  # (4.17: REC held 5 s clears the whole loop; the page stays the EQ)
+wait 5100
+release REC
 wait 40
 expect page 9
 wait 200
@@ -1023,35 +948,22 @@ wait 60
 expect msg_THE_LOOP'S_TRACK:_SELECT_ANOTHER 1
 key 7 up
 wait 20
-# --- a take with no loop under it, GLO held 3 s and OCT- twice: only the take goes, and that is what is said
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+# --- REC held 5 s (4.17): the loop goes, and the layer the press began with it
+press REC
+wait 5100
+expect msg_LOOP_CLEARED 1
+release REC
 wait 200
 expect loop_has 0
 expect loop_state 0
+# a take with no loop under it, REC pressed (its end) and held 5 s: what it made goes, there and then
 tap REC
 wait 1000
 expect loop_state 2
 expect loop_has 0
-press GLO
-wait 3100
-tap OCT-
-wait 100
-expect msg_TAKE_CANCELLED 1
-tap OCT-
-wait 200
-expect msg_NOTHING_TO_CLEAR 1
-expect msg_LOOP_CLEARED 0
-release GLO
-wait 30
-tap GLO
+press REC
+wait 5100
+release REC
 wait 200
 expect loop_state 0
 expect loop_has 0

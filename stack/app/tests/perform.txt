@@ -744,15 +744,9 @@ release GLO
 wait 30
 tap GLO
 wait 30
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0

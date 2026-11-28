@@ -167,9 +167,11 @@ static void cat_text(uint32_t i, char *b)    /* "KEYS 3/15": the group and the p
 #define ENV_AUTO (-1)                    /* RELEASE as before the ENV page: a held sound lets go at DECAY's pace, a hit
                                           * plays through */
 #define ENV_V_START 75                   /* VELOCITY as before: a quarter of the loudness fixed, the rest the finger's */
-#define GLO_UNDO_MS 3000u                /* GLO held this long: OCT- takes the newest layer off, OCT- again the whole loop (4.15) */
+#define GLO_UNDO_MS 3000u                /* GLO held this long: OCT- takes the newest layer off (4.15; 4.17: each OCT- one) */
+#define REC_CLEAR_MS 5000u               /* REC held this long: the whole loop goes (4.17, the owner's design) */
+#define REC_SHOW_MS 500u                 /* REC held past this: the header shows the hold's bar */
 /* the header says what REC is doing: it is held past a short press, or a take waits or runs */
-#define REC_HELD 0                       /* (4.15: REC only records; a hold does nothing more) */
+#define REC_HELD (ui.rec_t && !ui.rec_fired && (int32_t)(plat_ms() - ui.rec_t) >= (int32_t)REC_SHOW_MS)
 #define LP_TAKE (lp.state != LP_IDLE || lp.req == LQ_ARM)   /* a take waits or runs */
 #define LP_TAKE_LIVE (LP_TAKE && lp.req != LQ_CANCEL)          /* and is not being let go (REC's hold line, its undo) */
 #define REC_UP (REC_HELD || LP_TAKE)
@@ -1873,6 +1875,8 @@ static struct {
     uint32_t hot_t;
     uint8_t title;                       /* the title is up (the first TITLE_MS after a start) */
     uint8_t rec_take;                    /* this press of REC began a take */
+    uint8_t rec_fired;                   /* that hold cleared the loop already (4.17) */
+    uint32_t rec_t;                      /* REC went down (0: not held) */
     uint8_t glo_n;                       /* GLO held 3 s: 1, and one more for each OCT- since (4.15) */
     uint8_t oct_eat;                     /* that OCT- was GLO's, or held for KNOB 4's LEVEL: its let-go moves no octave */
     uint8_t fx_eat;                      /* FX held: a black key asked for a page; its let-go opens no page (4.16) */
@@ -2050,7 +2054,7 @@ static void looper_undo(void)                /* GLO held 3 s, OCT-: the take und
     }
 }
 
-static void looper_clear(void)               /* GLO held 3 s, OCT- twice: the whole loop goes; tracks 7 and 8 are their own again */
+static void looper_clear(void)               /* REC held 5 s (4.17): the whole loop goes; tracks 7 and 8 are their own again */
 {
     if (lp.has || LP_TAKE_LIVE) {
         lp.req = LQ_CLEAR;
@@ -2330,7 +2334,8 @@ static void knob_turn(uint32_t k, int32_t e)
     }
     ui.hot = (int8_t)k;
     ui.hot_t = plat_ms();
-    if (k == 3u && !(plat_buttons() >> B_OCTDN & 1u)) {     /* KNOB 4 (4.16): the page of steps shown, 1 to 4 */
+    if (k == 3u && ui.page == PAGE_STEP && !(plat_buttons() >> B_OCTDN & 1u)) {   /* KNOB 4 on the steps' page (4.16;
+                                             * 4.17: the tracks' page's KNOB 4 is LEVEL again): the page of steps, 1 to 4 */
         int32_t to = clamp((int32_t)seq_view + e, 0, (int32_t)NPAGE - 1);
         if (to != (int32_t)seq_view) {
             seq_view = (uint8_t)to;
@@ -2349,10 +2354,11 @@ static void knob_turn(uint32_t k, int32_t e)
         t->filt = (int8_t)clamp(t->filt + e, -FILT_MAX, FILT_MAX);
     } else if (k == 2u) {
         t->decay = (uint8_t)clamp(t->decay + e, 0, 100);
-    } else {                                 /* OCT- held + KNOB 4: LEVEL (4.16; letting OCT- go then is no octave) */
-        uint8_t *l = lvl_of(ui.sel);         /* (the loop's track: the loop's own level) */
+    } else {                                 /* LEVEL: the tracks' page's KNOB 4; the steps' page's with OCT- held (4.16; */
+        uint8_t *l = lvl_of(ui.sel);         /* letting OCT- go then is no octave). (The loop's track: the loop's own) */
         *l = (uint8_t)clamp(*l + e, 0, 100);
-        ui.oct_eat = 1;
+        if (plat_buttons() >> B_OCTDN & 1u)
+            ui.oct_eat = 1;
     }
     ui.redraw = 1;
 }
@@ -2567,8 +2573,8 @@ static void input(void)
         }
     }
 
-    /* 4.15: the loop is taken off with GLO held 3 s: OCT- then takes the newest layer off (or drops the take under
-     * way), OCT- again the whole loop. Playing on: the looper crosses over in 10 ms, fades out in 15 */
+    /* 4.15: GLO held 3 s, then OCT- takes the newest layer off (or drops the take under way); 4.17: each OCT- is
+     * that (the whole loop is REC held 5 s). Playing on: the looper crosses over in 10 ms, fades out in 15 */
     {
         const uint32_t now = plat_ms();
         if (pressed >> B_GLO & 1u) {
@@ -2579,14 +2585,12 @@ static void input(void)
             ui.glo_t = 0;
         if (ui.glo_t && ui.glo_n == 0 && (int32_t)(now - ui.glo_t) >= (int32_t)GLO_UNDO_MS) {
             ui.glo_n = 1;                    /* (1: ready; each OCT- from here counts) */
-            app_say("OCT-: UNDO", "TWICE: CLEAR");
+            app_say("OCT-:", "UNDO THE LAST LAYER");
         }
         if ((pressed >> B_OCTDN & 1u) && ui.glo_n) {
             ui.oct_eat = 1;                  /* (its let-go moves no octave) */
-            if (++ui.glo_n == 2u)
-                looper_undo();
-            else if (ui.glo_n == 3u)
-                looper_clear();
+            ui.glo_n = 2;
+            looper_undo();
         }
     }
     /* OCT- and OCT+ move the keys' octave, when the button is let go */
@@ -2599,12 +2603,25 @@ static void input(void)
     if (released >> B_OCTUP & 1u)
         octave_step(1);
     /* REC is the looper's (but on the GLO page, where it is DISCONNECT). It acts when it goes down: a layer is recorded
-     * from there, or the one recording ends. A hold does nothing more (4.15: taking layers off is GLO's) */
+     * from there, or the one recording ends. 4.17: held 5 s, the whole loop goes there and then (and the take the
+     * press began with it), the pattern playing on; the header shows the hold from half a second */
     if (ui.page != PAGE_GLO && (pressed >> B_REC & 1u)) {
         ui.rec_take = 0;
+        ui.rec_t = plat_ms() | 1u;
+        ui.rec_fired = 0;
         looper_press();
         lp.go = ui.rec_take;                 /* (a layer on top is taken at once: no hold to wait for) */
         ui.redraw = 1;
+    }
+    if (ui.rec_t) {
+        const uint32_t now = plat_ms();
+        if (!(btn >> B_REC & 1u))
+            ui.rec_t = 0;
+        else if (!ui.rec_fired && (int32_t)(now - ui.rec_t) >= (int32_t)REC_CLEAR_MS) {
+            ui.rec_fired = 1;
+            looper_clear();
+        }
+        ui.redraw = 1;                       /* (the hold's bar grows) */
     }
 
     /* FX opens its pages when it is let go (4.16), unless a black key asked for a page of steps while it was held */
@@ -2857,7 +2874,7 @@ static void draw_header(void)
     uint32_t now = plat_ms();
     const uint32_t svh = ui.sv_t && !ui.sv_fired && (int32_t)(now - ui.sv_t) > 400;
     /* a bar on the second line (SAVE held, or REC's): it has the line to itself, after the version */
-    const uint32_t bar = svh || (REC_UP && (now >= ui.msg_until || ui.msg_low) && !ui.perform);
+    const uint32_t bar = svh || (REC_UP && (now >= ui.msg_until || ui.msg_low || REC_HELD) && !ui.perform);
     HOST_DROP(host_hold);
     cv_begin(240, 28, C_BLACK);
     /* two lines: the first is the name row or a message; the second, small, is the version, always there (the build's
@@ -2870,7 +2887,7 @@ static void draw_header(void)
         cv_text(50, 2, &FONT_XS, "HOLD: CLEAR SAVED SONG", C_WHITE);
         cv_rect(50, 20, 184, 5, C_LINE);
         cv_rect(50, 20, (int32_t)(held >= SAVE_HOLD_MS ? 184u : held * 184u / SAVE_HOLD_MS), 5, C_WHITE);
-    } else if (now < ui.msg_until && !ui.msg_low) {
+    } else if (now < ui.msg_until && !ui.msg_low && !REC_HELD) {     /* (REC held: its bar comes first, 4.17) */
         int32_t x = cv_text(6, 0, &FONT_B, ui.msg[0], C_WHITE);
         cv_text(x + 6, 0, &FONT_B, ui.msg[1], C_HI);
     } else if (ui.perform) {                 /* SEL is held: the keys are PERFORM's */
@@ -2905,6 +2922,14 @@ static void draw_header(void)
             }
             w = t;
         }
+        if (REC_HELD) {                      /* 4.17: REC held: what it will do, and a bar full at 5 s */
+            const uint32_t held = plat_ms() - ui.rec_t;
+            w = "HOLD 5 S: CLEAR THE LOOP";
+            HOST_KEEP(host_hold, w);
+            cv_text(42, 2, &FONT_XS, w, C_HI);
+            cv_rect(50, 20, 184, 5, C_LINE);
+            cv_rect(50, 20, (int32_t)(held >= REC_CLEAR_MS ? 184u : held * 184u / REC_CLEAR_MS), 5, C_ORANGE);
+        } else {
         cv_text(42, 2, &FONT_XS, w, C_WHITE);
         {   /* the take's bar, running from the press: what is left, of the memory (a first layer; of its way to its
              * last bar's end once REC was pressed again) or of the pass round the loop (a layer on top). 4.15: thick
@@ -2914,6 +2939,7 @@ static void draw_header(void)
             cv_rect(51, 18, 184, 8, C_BLACK);
             if (of && tk < of)
                 cv_rect(51, 18, (int32_t)((of - tk) * 23u / (of / 8u + 1u)), 8, RGB(255, 40, 40));
+        }
         }
     } else {
         int32_t x = cv_text(6, 0, &FONT_B, APP_NAME, C_ORANGE);
@@ -3151,13 +3177,13 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             int_text(t->pitch, v + (t->pitch > 0 ? 1 : 0));
         } else if (k == 1u) {
             filt_text(t->filt, v);
-        } else if (k == 3u && !(plat_buttons() >> B_OCTDN & 1u)) {     /* KNOB 4: the page of steps (4.16); */
+        } else if (k == 3u && ui.page == PAGE_STEP && !(plat_buttons() >> B_OCTDN & 1u)) {   /* the steps' page's KNOB 4: */
             int_text((int32_t)seq_view + 1, v);      /* OCT- held, LEVEL */
             text_cat(v, "/4");
         } else {
             int_text(k == 2u ? t->decay : *lvl_of(ui.sel), v);
         }
-        cv_text(x, 3, &FONT_XS, k == 3u && !(plat_buttons() >> B_OCTDN & 1u) ? "PAGE" : NAME[k], C_GRAY);
+        cv_text(x, 3, &FONT_XS, k == 3u && ui.page == PAGE_STEP && !(plat_buttons() >> B_OCTDN & 1u) ? "PAGE" : NAME[k], C_GRAY);
         cv_text(x, 16, &FONT_B, v, hot ? C_WHITE : C_HI);
         if (k == 1u) {                       /* FILTER: where it stands, the off zone marked in the middle */
             int32_t c = x + 27, p = c + (int32_t)t->filt * 26 / FILT_MAX;
@@ -3166,7 +3192,7 @@ static void draw_knobs(void)                 /* the four knobs of the selected t
             cv_rect(p - 1, 32, 3, 7, t->filt >= -FILT_DEAD && t->filt <= FILT_DEAD ? C_GRAY : C_ORANGE);
         }
     }
-    if (!hint_line(lp.own ? "REC: LAYER  GLO 3 S+OCT-: UNDO  x2: CLEAR" : "ALGO: TRACK  PRESETS: SOUND")) {
+    if (!hint_line(lp.own ? "HOLD REC: CLEAR  GLO 3 S+OCT-: UNDO" : "ALGO: TRACK  PRESETS: SOUND")) {
         char c[20];                          /* where the track's sound is in the list: its category and place there;
                                               * the loop's track: LOOP and its length (its own sound sleeps) */
         if (on_t8l()) {
@@ -3653,7 +3679,7 @@ void app_ui_init(void)
     lcd_fill(0, 0, 240, 240, C_BLACK);
     ui.held_step = -1;
     ui.hot = -1;
-    ui.sv_t = ui.home_t = 0;
+    ui.sv_t = ui.home_t = ui.rec_t = 0;
     ui.wake = 0;
     ui.deaf_t = 0;
     ui.perform = 0;

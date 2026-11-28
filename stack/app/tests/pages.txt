@@ -1,5 +1,5 @@
-# STACK in the host simulator: the pattern's pages (4.16). KNOB 4 on the tracks' and the steps' pages picks the page
-# of steps shown, 1 to 4 (16 steps each, a page a bar); a page reached the first time is a copy of the one before, and
+# STACK in the host simulator: the pattern's pages (4.16). KNOB 4 on the steps' page picks the page of steps shown,
+# 1 to 4 (4.17: on the tracks' page KNOB 4 is LEVEL again) (16 steps each, a page a bar); a page reached the first time is a copy of the one before, and
 # the pattern is as long as the furthest page reached, the same for all tracks. OCT- held + KNOB 4 is LEVEL (letting
 # OCT- go then moves no octave). GLO: KNOB 2 PLAY MODE (CHAIN: page after page; PAGE: the page shown, over and over,
 # a change from the next bar), KNOB 3 LENGTH (shorter: the pages cut are kept). FX held + black keys 1 to 4: CHAIN
@@ -74,8 +74,19 @@ wait 40
 tap SEQ
 wait 40
 expect page 0
-# --- OCT- held + KNOB 4: LEVEL, the page stays; OCT- let go moves no octave
+# --- the tracks' page: KNOB 4 is LEVEL (4.17), the page stays
 expect level 80
+turn K4 -5
+wait 40
+expect level 75
+expect seq_view 1
+expect seq_pages 4
+turn K4 5
+wait 40
+expect level 80
+# the steps' page: OCT- held + KNOB 4 is LEVEL, the page stays; OCT- let go moves no octave
+tap SEQ
+wait 40
 expect octave 0
 press OCT-
 turn K4 -10
@@ -85,6 +96,9 @@ wait 40
 expect level 70
 expect seq_view 1
 expect octave 0
+tap SEQ
+wait 40
+expect page 0
 # OCT- alone still moves the octave
 tap OCT-
 wait 40
@@ -212,11 +226,14 @@ wait 1000
 expect seq_pg 1
 wait 2000
 expect seq_pg 1
+tap SEQ
+wait 40
 turn K4 1
 wait 40
 expect seq_view 2
 expect seq_pg 1
-wait 1200
+tap SEQ
+wait 1120
 expect seq_pg 2
 wait 2000
 expect seq_pg 2

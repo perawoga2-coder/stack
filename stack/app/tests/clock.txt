@@ -724,16 +724,10 @@ expect loop_has 1
 shot clock_tempo_changed.png
 clock 40 22
 shot clock_loop_out_of_time.png
-# --- 4.15: the loop taken off with GLO held 3 s and OCT- twice, the clock running
-press GLO
-clock 160 20
-tap OCT-
-clock 2 20
-tap OCT-
-clock 10 20
-release GLO
-clock 2 20
-tap GLO
+# --- 4.17: the loop taken off with REC held 5 s, the clock running (the layer the press began goes with it)
+press REC
+clock 255 20
+release REC
 clock 10 20
 expect loop_has 0
 clock 1 18
@@ -741,23 +735,21 @@ midi FC 00 00
 clock 10 20
 expect playing 0
 expect clk_follow 1
-# REC with no loop and the clock stopped: REC cannot start one; a hold is a press, nothing more
+# REC with no loop and the clock stopped: REC cannot start one; held 5 s, nothing to clear, and the screen says so
 press REC
 clock 5 20
 expect msg_MUST_RUN_FIRST 1
-clock 95 20
+clock 255 20
+expect msg_NOTHING_TO_CLEAR 1
 release REC
 clock 5 20
 expect loop_state 0
-# GLO held 3 s with no loop: OCT- has nothing to undo, again nothing to clear, and the screen says so
+# GLO held 3 s with no loop: OCT- has nothing to undo, and the screen says so
 press GLO
 clock 160 20
 tap OCT-
 clock 5 20
 expect msg_NO_LAYER_TO_UNDO 1
-tap OCT-
-clock 5 20
-expect msg_NOTHING_TO_CLEAR 1
 release GLO
 clock 2 20
 tap GLO

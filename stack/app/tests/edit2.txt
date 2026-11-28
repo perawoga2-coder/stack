@@ -151,15 +151,9 @@ expect seq_len 14
 wait 2500
 expect loop_drift 1
 shot edit2_seven_eight_loop.png
-press GLO
-wait 3100
-tap OCT-
-wait 30
-tap OCT-
-wait 30
-release GLO
-wait 30
-tap GLO
+press REC  # (4.17: REC held 5 s clears the whole loop)
+wait 5100
+release REC
 wait 30
 wait 200
 expect loop_has 0

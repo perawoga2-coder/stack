@@ -34,8 +34,7 @@ This is the page you see after the start. It lists the eight tracks, T1 to T8.
 | K1 PITCH | Tunes the track, in semitones, −24 to +24. |
 | K2 FILTER | A DJ filter. Left closes a low-pass. Right opens a high-pass. The middle is OFF. |
 | K3 DECAY | How long the sound rings. For a drum: how fast it fades. For a held sound: how fast it lets go. |
-| K4 PAGE | The page of steps you see and edit, 1 to 4. See "Long patterns". |
-| OCT− held + K4 | LEVEL: the track's volume. Letting go of OCT− then does not move the octave. |
+| K4 LEVEL | The track's volume. (On the step page K4 picks the page of steps: see "Long patterns".) |
 | MASTER | The volume of the FM-1's speaker and headphone jack. |
 | PLAY | Starts and stops the sequencer. |
 | SELECT knob | The tempo, 40 to 240 BPM. One click is 1 BPM. It works on every page. |
@@ -83,13 +82,14 @@ first step is 17.
 
 A pattern can be up to four pages of steps. One page is one bar: 16 steps in 4/4.
 
-- **K4 picks the page** on the play page and on the step page. The screen shows `PAGE 2/4` (in K4's place).
+- **K4 on the step page picks the page.** The screen shows `PAGE 2/4` (in K4's place). On the play page K4 is
+  LEVEL, as always (in 4.16 it picked the page there too).
 - **A page you reach for the first time is a copy of the page before it,** for all tracks. Then change it.
 - **The pattern is as long as the furthest page you reached.** If you never turn to page 2, the pattern stays 16
   steps. Turn to page 2: 32 steps. All tracks have the same length.
 - **Shorter again:** GLO page, K3 LENGTH. The pages you cut are kept, not deleted: make the pattern longer again
   and they come back as they were.
-- **LEVEL** moved: hold OCT− and turn K4.
+- **LEVEL on the step page:** hold OCT− and turn K4. On the play page K4 alone is LEVEL.
 
 How the pages play is GLO's K2 PLAY MODE:
 
@@ -260,19 +260,22 @@ Nothing waits for a bar, and you do not have to press PLAY first.
 
 | Button | What it does |
 |---|---|
-| REC | Records a layer, from the press. While it records: ends it. REC is only for recording: holding it does nothing more. |
+| REC | Records a layer, from the press. While it records: ends it. |
+| REC held 5 seconds | Clears the whole loop (since 4.17), and the layer the press began with it. |
 | GLO held 3 seconds, then OCT− | Removes the last layer (or cancels the layer that is recording). Only one layer can be removed. |
-| GLO held 3 seconds, then OCT− twice | Clears the whole loop. |
 
 While a layer records on the TRACKS page, the track list gives way to a big recording panel: `REC` and the layer
 number, the seconds left, and a graph of what you record as it comes in, with a line at each bar. When you press
 REC to end a first layer, an orange line shows where it will stop. At the top of the screen a thick red bar shows
 the time left.
 
-To remove: hold GLO. After 3 seconds the screen says `OCT-: UNDO  TWICE: CLEAR`. Press OCT− once to remove the
-last layer; press it again (still holding GLO) to clear the whole loop. The music plays on while you do it. That
-OCT− does not change the octave. If you let go of GLO before 3 seconds, OCT− changes the octave as usual. Holding
-GLO also opens the GLO page; press GLO again to go back.
+To clear the whole loop: hold REC. After half a second the top of the screen says `HOLD 5 S: CLEAR THE LOOP` and a
+bar fills; at 5 seconds the loop is gone and the screen says `LOOP CLEARED`. The music plays on. On the GLO page REC
+is Bluetooth's DISCONNECT instead.
+
+To remove the last layer: hold GLO. After 3 seconds the screen says `OCT-: UNDO THE LAST LAYER`. Press OCT− and the
+last layer goes at once. The music plays on. That OCT− does not change the octave. If you let go of GLO before 3
+seconds, OCT− changes the octave as usual. Holding GLO also opens the GLO page; press GLO again to go back.
 
 - **No seam.** What still sounds when a layer ends (the tails of your notes) is laid on the loop where it comes
   round, so the sound runs on through the loop's start without a dip or a click.
@@ -303,7 +306,7 @@ GLO also opens the GLO page; press GLO again to go back.
   Selecting T8L or T7L only to set the loop's LEVEL says nothing.
 - While a layer records, the name of a page you open (`EDIT PAGE 2`, `FX PAGE`, `ENV PAGE` and so on) shows on the
   bottom line too, so the top of the screen keeps showing the recording.
-- The loop has its own LEVEL: OCT− held + K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
+- The loop has its own LEVEL: K4 on T8L or T7L sets it, and it stays the same when the loop moves. A new loop starts
   at 80, as loud as you played it. The FILTER, EQ, FX and LFO of the track that holds the loop work on the loop.
 - Starting a new layer means the layer before it can no longer be removed.
 - If you stop the sequencer while a layer records, that layer is dropped.

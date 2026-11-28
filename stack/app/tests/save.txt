@@ -27,9 +27,7 @@ expect sound 37
 turn K1 3
 turn K2 -12
 turn K3 20
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 -30
-release OCT-
 wait 40
 tap FX
 wait 40
@@ -274,9 +272,7 @@ turn ALGO 1
 wait 40
 expect track 8
 turn PRESET 5
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 -20
-release OCT-
 wait 60
 tap SEQ
 wait 40
@@ -302,9 +298,7 @@ expect loop_trk 7
 turn ALGO 2
 wait 40
 expect level 80
-press OCT-  # (4.16: OCT- held + KNOB 4 is LEVEL; KNOB 4 alone the page)
 turn K4 -30
-release OCT-
 wait 40
 expect level 50
 tap PLAY
