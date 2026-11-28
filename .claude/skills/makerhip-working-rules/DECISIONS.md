@@ -25,8 +25,8 @@
 - Vacuum: Clear everything / Lanes 1–8 only + Direct Split (เลือกบาร์); รองรับลูปหลายบาร์และลูปที่แทร็ก 7; ลบช่อง MY ได้ (3.60)
 - มี limiter ที่ master ตั้งแต่ 3.59
 - 3.65 (28 พ.ย.): ปุ่ม Backup everything / Restore ในหน้า Setup; เจ้าของลง 3.65 และสำรองแล้ว
-- กุญแจ: กุญแจเซ็นเดิมเขียนเปิดเผยใน build.yml (repo สาธารณะ) เจ้าของเลือก "ทำกุญแจใหม่" (ข); มีกุญแจ Maker Hip ใน GitHub Secrets อยู่แล้ว (RELEASE_KEYSTORE_B64 _2 _3, RELEASE_PASSWORD, alias makerhip) ใช้ตัวนี้ ไม่ต้องสร้างใหม่; INBOX ระหว่าง Burger กับ 16 Track เป็น signature permission + authority ตายตัว com.makerhip.burger.inbox → ย้ายกุญแจต้องคิดทั้งคู่; ยังรอเจ้าของเลือก ก (ย้ายทั้งคู่) / ข (Burger ก่อน ชื่อแอปใหม่) / ค (พัก)
-- Android Developer Console (28 พ.ย.): เจ้าของสมัครแล้ว แบบ Full (จ่ายค่าลงทะเบียนแล้ว) ยืนยันตัวตน + เบอร์โทรผ่าน; ยังไม่ได้ลงทะเบียนชื่อแพ็กเกจ (รอเรื่องกุญแจ) — ข้อมูลส่วนตัวกรอกบนหน้า Google เท่านั้น ห้ามรับ OTP/เอกสาร
+- กุญแจ + ชื่อแอป (28 พ.ย., เจ้าของเลือก ก = ย้ายทั้งคู่): Burger 3.66 = com.makerhip.burgerstudio.lab, 16 Track 0.12 = com.makerhip.track16.studio, เซ็นด้วยกุญแจ Maker Hip จาก Secrets ทั้ง 2 repo (SHA-256 F3:D4:07:4B:…:EA:44:90); INBOX ชื่อใหม่ com.makerhip.burgerstudio.inbox / com.makerhip.studio.permission.INBOX; ลงข้างชุดเก่าได้ ย้ายข้อมูลด้วย Backup (Burger 3.65 / 16 Track 0.11) → Restore; กุญแจเก่า (B7:C6, เปิดเผย) ออกจาก build สาขา ccr แล้ว (สาขา main ของ fm1bridge ยังมี รอเจ้าของอนุญาต); ไฟล์กุญแจ Maker Hip ชุดเดิมเคยส่งให้เจ้าของ 23–24 พ.ย. เจ้าของไม่มีสำเนาแล้ว → Secrets คือที่เก็บเดียว
+- Android Developer Console (28 พ.ย.): บัญชี "Nume" แบบ Full (จ่ายแล้ว) ยืนยันตัวตน + เบอร์ผ่าน; ลงทะเบียน 2 ชื่อแพ็กเกจข้างบนแล้ว (อยู่ระหว่างตรวจสอบ) — ข้อมูลส่วนตัวกรอกบนหน้า Google เท่านั้น ห้ามรับ OTP/เอกสาร
 - รอ (27 พ.ย.): Burger อิมูเลเตอร์บนเว็บ/ใน Hub — เจ้าของให้รอหลังอัปเกรดฟีเจอร์ Burger ตอนอัปเดตโทเค็นแล้ว (ตัวเลือกที่เสนอ: ก ลิงก์ในการ์ด, ข แผงแนะนำในหน้า emu, ค พอร์ต Burger ขึ้นเว็บจริง); การ์ด Hub ยังเขียน "16-step" ต้องแก้ตอน release 4.16
 
 ## วิธีทำงาน
